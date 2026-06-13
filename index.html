@@ -1,10 +1,3869 @@
-<!DOCTYPE html>
-<html>
+<!doctype html>
+<html lang="en">
 <head>
-    <title>My Website</title>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>modcheck — minecraft mod malware triage</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght,SOFT@0,9..144,300..600,0..100;1,9..144,300..600,0..100&family=IBM+Plex+Mono:ital,wght@0,300;0,400;0,500;0,600;1,400&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #0c0c0d;
+    --surface: #141416;
+    --surface-2: #1d1d20;
+    --line: #28282c;
+    --line-bright: #3a3a3f;
+    --text: #f0e9d8;
+    --text-dim: #8d8676;
+    --text-dimmer: #5c574c;
+    --accent: #d4c4a8;
+    --red: #ff3b30;
+    --red-dim: #6b1a16;
+    --orange: #ff9f0a;
+    --orange-dim: #6b430a;
+    --yellow: #ffd60a;
+    --yellow-dim: #6b5a0a;
+    --green: #30d158;
+    --green-dim: #1a5527;
+    --blue: #64d2ff;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  html, body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'IBM Plex Mono', ui-monospace, monospace;
+    font-size: 13px;
+    line-height: 1.55;
+    min-height: 100vh;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* subtle film grain */
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    z-index: 100;
+    opacity: 0.035;
+    mix-blend-mode: overlay;
+    background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='3'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  }
+
+  .wrap { max-width: 920px; margin: 0 auto; padding: 56px 32px 96px; }
+
+  /* ─── Header ─────────────────────────────────────────── */
+  header {
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+    border-bottom: 1px solid var(--line);
+    padding-bottom: 24px;
+    margin-bottom: 48px;
+  }
+  .wordmark {
+    font-family: 'Fraunces', serif;
+    font-style: italic;
+    font-weight: 300;
+    font-variation-settings: 'SOFT' 100, 'opsz' 144;
+    font-size: 84px;
+    line-height: 0.85;
+    letter-spacing: -0.04em;
+    color: var(--text);
+  }
+  .wordmark .dot { color: var(--accent); }
+  .tagline {
+    text-transform: uppercase;
+    letter-spacing: 0.18em;
+    font-size: 10px;
+    color: var(--text-dim);
+    text-align: right;
+    max-width: 240px;
+  }
+  .tagline strong {
+    color: var(--text);
+    font-weight: 500;
+    display: block;
+    margin-bottom: 6px;
+  }
+
+  /* ─── Drop zone ──────────────────────────────────────── */
+  .drop {
+    position: relative;
+    border: 1px dashed var(--line-bright);
+    background: linear-gradient(180deg, var(--surface), var(--bg));
+    padding: 64px 32px;
+    text-align: center;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    overflow: hidden;
+  }
+  .drop:hover { border-color: var(--accent); background: var(--surface); }
+  .drop.drag-over {
+    border-style: solid;
+    border-color: var(--accent);
+    background: var(--surface);
+    transform: scale(1.005);
+  }
+  .drop.scanning { pointer-events: none; }
+  .drop.scanning::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(90deg, transparent, rgba(212,196,168,0.12), transparent);
+    animation: sweep 1.4s linear infinite;
+  }
+  @keyframes sweep {
+    0% { transform: translateX(-100%); }
+    100% { transform: translateX(100%); }
+  }
+  .drop .icon {
+    font-family: 'Fraunces', serif;
+    font-style: italic;
+    font-size: 72px;
+    color: var(--text-dimmer);
+    line-height: 1;
+    margin-bottom: 18px;
+    font-variation-settings: 'SOFT' 100;
+  }
+  .drop .prompt {
+    font-size: 14px;
+    color: var(--text);
+    margin-bottom: 4px;
+  }
+  .drop .sub {
+    font-size: 11px;
+    color: var(--text-dim);
+    text-transform: uppercase;
+    letter-spacing: 0.14em;
+  }
+  .drop input { display: none; }
+  .drop .progress {
+    margin-top: 14px;
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.16em;
+    color: var(--accent);
+    min-height: 14px;
+    transition: opacity 0.2s;
+  }
+  .drop:not(.scanning) .progress { opacity: 0; }
+  .drop.scanning .progress { opacity: 1; }
+
+  /* ─── Compact file header (after scan) ───────────────── */
+  .file-bar {
+    display: none;
+    align-items: center;
+    justify-content: space-between;
+    border: 1px solid var(--line);
+    padding: 18px 24px;
+    background: var(--surface);
+  }
+  .file-bar.show { display: flex; }
+  .file-bar .fn {
+    font-size: 14px;
+    color: var(--text);
+    font-weight: 500;
+  }
+  .file-bar .meta {
+    font-size: 11px;
+    color: var(--text-dim);
+    margin-top: 4px;
+  }
+  .file-bar .meta span { color: var(--text); }
+  .reset-btn {
+    background: transparent;
+    border: 1px solid var(--line-bright);
+    color: var(--text-dim);
+    font-family: inherit;
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.14em;
+    padding: 8px 14px;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+  .reset-btn:hover { color: var(--text); border-color: var(--accent); }
+
+  /* ─── Results ────────────────────────────────────────── */
+  .results { display: none; margin-top: 40px; }
+  .results.show { display: block; animation: fadeIn 0.4s ease; }
+  @keyframes fadeIn {
+    from { opacity: 0; transform: translateY(8px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  /* ─── Verdict block ──────────────────────────────────── */
+  .verdict {
+    display: grid;
+    grid-template-columns: 200px 1fr;
+    gap: 40px;
+    align-items: center;
+    padding: 40px 0;
+    border-bottom: 1px solid var(--line);
+  }
+  .gauge { position: relative; width: 200px; height: 200px; }
+  .gauge svg { width: 100%; height: 100%; transform: rotate(-90deg); }
+  .gauge .track { fill: none; stroke: var(--line); stroke-width: 6; }
+  .gauge .fill {
+    fill: none;
+    stroke: var(--green);
+    stroke-width: 6;
+    stroke-linecap: round;
+    transition: stroke-dashoffset 0.9s cubic-bezier(0.2, 0.8, 0.2, 1), stroke 0.4s;
+  }
+  .gauge .score {
+    position: absolute; inset: 0;
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+  }
+  .gauge .num {
+    font-family: 'Fraunces', serif;
+    font-style: italic;
+    font-weight: 300;
+    font-variation-settings: 'SOFT' 100, 'opsz' 144;
+    font-size: 76px;
+    line-height: 0.85;
+    color: var(--text);
+  }
+  .gauge .label {
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.18em;
+    color: var(--text-dim);
+    margin-top: 8px;
+  }
+  .verdict-text {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+  .verdict-text .band {
+    font-family: 'Fraunces', serif;
+    font-style: italic;
+    font-weight: 400;
+    font-variation-settings: 'SOFT' 80;
+    font-size: 42px;
+    line-height: 1;
+    letter-spacing: -0.02em;
+  }
+  .verdict-text .summary {
+    font-size: 14px;
+    color: var(--text-dim);
+    max-width: 460px;
+    line-height: 1.6;
+  }
+  .verdict-text .known-bad {
+    display: inline-block;
+    margin-top: 8px;
+    padding: 6px 12px;
+    border: 1px solid var(--red);
+    background: rgba(255, 59, 48, 0.1);
+    color: var(--red);
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.15em;
+  }
+
+  /* ─── Sections ───────────────────────────────────────── */
+  section.block {
+    padding: 32px 0;
+    border-bottom: 1px solid var(--line);
+  }
+  .section-head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    margin-bottom: 20px;
+  }
+  .section-head h2 {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.22em;
+    color: var(--text-dim);
+    font-weight: 500;
+  }
+  .section-head .count {
+    font-size: 11px;
+    color: var(--text-dimmer);
+    letter-spacing: 0.1em;
+  }
+
+  /* ─── Flag list ──────────────────────────────────────── */
+  .flags { display: flex; flex-direction: column; gap: 1px; background: var(--line); }
+  .flag {
+    display: grid;
+    grid-template-columns: 4px 1fr auto;
+    align-items: stretch;
+    background: var(--surface);
+    padding: 14px 18px 14px 22px;
+    gap: 16px;
+    border-left: 0;
+    position: relative;
+  }
+  .flag::before {
+    content: '';
+    position: absolute;
+    left: 0; top: 0; bottom: 0;
+    width: 3px;
+  }
+  .flag.sev-red::before { background: var(--red); }
+  .flag.sev-orange::before { background: var(--orange); }
+  .flag.sev-yellow::before { background: var(--yellow); }
+  .flag.sev-green::before { background: var(--green); }
+  .flag .body { grid-column: 2; }
+  .flag .title {
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--text);
+    margin-bottom: 2px;
+  }
+  .flag .desc {
+    font-size: 12px;
+    color: var(--text-dim);
+    line-height: 1.5;
+  }
+  .flag .sev-pill {
+    grid-column: 3;
+    align-self: center;
+    font-size: 9px;
+    text-transform: uppercase;
+    letter-spacing: 0.16em;
+    padding: 4px 10px;
+    border: 1px solid;
+  }
+  .flag.sev-red .sev-pill { color: var(--red); border-color: var(--red-dim); background: rgba(255, 59, 48, 0.06); }
+  .flag.sev-orange .sev-pill { color: var(--orange); border-color: var(--orange-dim); background: rgba(255, 159, 10, 0.06); }
+  .flag.sev-yellow .sev-pill { color: var(--yellow); border-color: var(--yellow-dim); background: rgba(255, 214, 10, 0.06); }
+  .flag.sev-green .sev-pill { color: var(--green); border-color: var(--green-dim); background: rgba(48, 209, 88, 0.06); }
+
+  /* ─── Detail tables ──────────────────────────────────── */
+  .kv {
+    display: grid;
+    grid-template-columns: 200px 1fr;
+    gap: 8px 24px;
+    font-size: 12px;
+  }
+  .kv dt {
+    color: var(--text-dim);
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    font-size: 10px;
+    padding-top: 3px;
+  }
+  .kv dd {
+    color: var(--text);
+    word-break: break-all;
+  }
+  .kv dd a { color: var(--blue); text-decoration: none; border-bottom: 1px solid currentColor; }
+  .kv dd a:hover { color: var(--text); }
+
+  .pre {
+    background: var(--surface);
+    padding: 14px 18px;
+    font-size: 11.5px;
+    line-height: 1.7;
+    color: var(--text);
+    white-space: pre-wrap;
+    word-break: break-word;
+    border-left: 2px solid var(--line-bright);
+  }
+  .pre.empty { color: var(--text-dim); font-style: italic; }
+
+  .string-list {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    font-size: 12px;
+  }
+  .string-list .row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 6px 8px;
+    background: var(--surface);
+  }
+  .string-list .row code {
+    color: var(--text);
+    word-break: break-all;
+    flex: 1;
+  }
+  .string-list .row .tag {
+    flex-shrink: 0;
+    font-size: 9px;
+    text-transform: uppercase;
+    letter-spacing: 0.14em;
+    padding: 2px 8px;
+    color: var(--bg);
+    background: var(--text-dim);
+  }
+  .string-list .row.red code { color: var(--red); }
+  .string-list .row.red .tag { background: var(--red); color: var(--bg); }
+  .string-list .row.orange code { color: var(--orange); }
+  .string-list .row.orange .tag { background: var(--orange); color: var(--bg); }
+
+  /* ─── Evidence cards ─────────────────────────────────────── */
+  .evidence-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+  }
+  .evidence-card {
+    background: var(--surface);
+    border: 1px solid var(--line);
+    padding: 14px 16px;
+    min-width: 0;
+  }
+  .evidence-card .top {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    margin-bottom: 8px;
+  }
+  .evidence-card .name {
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--text);
+  }
+  .evidence-card .why {
+    color: var(--text-dim);
+    font-size: 11px;
+    line-height: 1.55;
+    margin-bottom: 10px;
+  }
+  .evidence-card .class-sample {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+  .evidence-card code {
+    color: var(--text);
+    font-size: 10.5px;
+    line-height: 1.4;
+    word-break: break-all;
+  }
+  .evidence-card .more {
+    color: var(--text-dimmer);
+    font-size: 10px;
+    margin-top: 4px;
+  }
+  .micro-pill {
+    flex-shrink: 0;
+    border: 1px solid var(--line-bright);
+    color: var(--text-dim);
+    background: rgba(255,255,255,0.02);
+    font-size: 9px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    padding: 3px 8px;
+  }
+  .micro-pill.red { color: var(--red); border-color: var(--red-dim); }
+  .micro-pill.orange { color: var(--orange); border-color: var(--orange-dim); }
+  .micro-pill.yellow { color: var(--yellow); border-color: var(--yellow-dim); }
+  .micro-pill.green { color: var(--green); border-color: var(--green-dim); }
+  .note-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 10px;
+  }
+  .note-card {
+    border: 1px solid var(--line);
+    background: var(--surface);
+    padding: 14px 16px;
+  }
+  .note-card .k {
+    color: var(--text-dim);
+    font-size: 10px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    margin-bottom: 6px;
+  }
+  .note-card .v {
+    color: var(--text);
+    font-size: 12px;
+    line-height: 1.5;
+  }
+  .endpoint-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+  .endpoint-chip {
+    border: 1px solid var(--line);
+    background: var(--surface-2);
+    color: var(--text-dim);
+    padding: 4px 8px;
+    font-size: 10.5px;
+    word-break: break-all;
+  }
+  .endpoint-chip.red { color: var(--red); border-color: var(--red-dim); }
+  .endpoint-chip.orange { color: var(--orange); border-color: var(--orange-dim); }
+  .endpoint-chip.green { color: var(--green); border-color: var(--green-dim); }
+
+  .risk-grid {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .risk-card {
+    border: 1px solid var(--line);
+    background: var(--surface);
+    padding: 14px 16px;
+  }
+  .risk-card.high { border-left: 3px solid var(--red); }
+  .risk-card.medium { border-left: 3px solid var(--orange); }
+  .risk-card.low { border-left: 3px solid var(--yellow); }
+  .risk-card .risk-top {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 8px;
+  }
+  .risk-card .risk-class {
+    color: var(--text);
+    font-size: 12px;
+    font-weight: 500;
+    word-break: break-all;
+  }
+  .risk-card .risk-score {
+    flex-shrink: 0;
+    font-size: 10px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--text-dim);
+    border: 1px solid var(--line-bright);
+    padding: 3px 8px;
+  }
+  .risk-card.high .risk-score { color: var(--red); border-color: var(--red-dim); }
+  .risk-card.medium .risk-score { color: var(--orange); border-color: var(--orange-dim); }
+  .risk-card.low .risk-score { color: var(--yellow); border-color: var(--yellow-dim); }
+  .risk-card .reason-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+  .risk-card .reason-list span {
+    color: var(--text-dim);
+    border: 1px solid var(--line);
+    background: var(--surface-2);
+    padding: 3px 7px;
+    font-size: 10.5px;
+  }
+
+  /* ─── Footer ─────────────────────────────────────────── */
+  footer {
+    margin-top: 56px;
+    padding-top: 24px;
+    border-top: 1px solid var(--line);
+    font-size: 11px;
+    color: var(--text-dimmer);
+    text-align: center;
+    letter-spacing: 0.04em;
+    line-height: 1.7;
+  }
+  footer .disclaimer {
+    color: var(--text-dim);
+    max-width: 560px;
+    margin: 0 auto 12px;
+  }
+
+  /* ─── Error banner ──────────────────────────────────── */
+  .err {
+    display: none;
+    border: 1px solid var(--red-dim);
+    background: rgba(255, 59, 48, 0.08);
+    color: var(--red);
+    padding: 14px 18px;
+    margin-top: 20px;
+    font-size: 12px;
+  }
+  .err.show { display: block; }
+
+  @media (max-width: 640px) {
+    .wordmark { font-size: 56px; }
+    .verdict { grid-template-columns: 1fr; text-align: center; }
+    .gauge { margin: 0 auto; }
+    .kv { grid-template-columns: 1fr; gap: 0 0; }
+    .kv dt { margin-top: 12px; }
+    .evidence-grid, .note-grid { grid-template-columns: 1fr; }
+  }
+</style>
 </head>
 <body>
-    <h1>Welcome to My Website!</h1>
-    <p>This is my first website.</p>
+<div class="wrap">
+
+  <header>
+    <div class="wordmark">modcheck<span class="dot">.</span></div>
+    <div class="tagline">
+      <strong>forensic triage</strong>
+      drop a .jar or .java to scan for malware indicators
+    </div>
+  </header>
+
+  <div class="drop" id="drop" tabindex="0" role="button" aria-label="Drop a .jar file to scan">
+    <div class="icon">＋</div>
+    <div class="prompt">drag &amp; drop a .jar or .java here</div>
+    <div class="sub">or click to select · everything runs in your browser</div>
+    <input type="file" id="file-input" accept=".jar,.zip,.java">
+    <div class="progress" id="progress" aria-live="polite"></div>
+  </div>
+
+  <div class="err" id="err"></div>
+
+  <div class="file-bar" id="file-bar">
+    <div>
+      <div class="fn" id="fb-name">—</div>
+      <div class="meta" id="fb-meta">—</div>
+    </div>
+    <button class="reset-btn" id="reset">scan another</button>
+  </div>
+
+  <div class="results" id="results">
+    <div class="verdict">
+      <div class="gauge">
+        <svg viewBox="0 0 120 120">
+          <circle class="track" cx="60" cy="60" r="54"/>
+          <circle class="fill" id="gauge-fill" cx="60" cy="60" r="54"
+                  stroke-dasharray="339.292" stroke-dashoffset="339.292"/>
+        </svg>
+        <div class="score">
+          <div class="num" id="score-num">0</div>
+          <div class="label">risk score</div>
+        </div>
+      </div>
+      <div class="verdict-text">
+        <div class="band" id="verdict-band">—</div>
+        <div class="summary" id="verdict-summary">—</div>
+        <div id="known-bad-banner" style="display:none"></div>
+      </div>
+    </div>
+
+    <section class="block" id="sec-flags">
+      <div class="section-head">
+        <h2>indicators</h2>
+        <div class="count" id="flag-count">0</div>
+      </div>
+      <div class="flags" id="flag-list"></div>
+    </section>
+
+    <section class="block">
+      <div class="section-head"><h2>file</h2></div>
+      <dl class="kv" id="file-kv"></dl>
+    </section>
+
+    <section class="block" id="sec-meta">
+      <div class="section-head"><h2>mod metadata</h2></div>
+      <div id="meta-content"></div>
+    </section>
+
+    <section class="block" id="sec-classes">
+      <div class="section-head">
+        <h2>class breakdown</h2>
+        <div class="count" id="class-count">0</div>
+      </div>
+      <dl class="kv" id="class-kv"></dl>
+    </section>
+
+    <section class="block" id="sec-patterns">
+      <div class="section-head">
+        <h2>detected api patterns</h2>
+        <div class="count" id="api-count">0</div>
+      </div>
+      <div id="api-content"></div>
+    </section>
+
+    <section class="block" id="sec-risky-classes">
+      <div class="section-head">
+        <h2>behavior clusters</h2>
+        <div class="count" id="risk-count">0</div>
+      </div>
+      <div id="risk-content"></div>
+    </section>
+
+    <section class="block" id="sec-bytecode" style="display:none">
+      <div class="section-head">
+        <h2>method calls (bytecode)</h2>
+        <div class="count" id="bytecode-count">0</div>
+      </div>
+      <div id="bytecode-content"></div>
+    </section>
+
+    <section class="block" id="sec-partial-parses" style="display:none">
+      <div class="section-head">
+        <h2>partial parses</h2>
+        <div class="count" id="partial-count">0</div>
+      </div>
+      <div id="partial-content"></div>
+    </section>
+
+    <section class="block" id="sec-notes">
+      <div class="section-head"><h2>scanner notes</h2></div>
+      <div id="triage-content"></div>
+    </section>
+
+    <section class="block" id="sec-strings">
+      <div class="section-head">
+        <h2>plaintext strings</h2>
+        <div class="count" id="strings-count">0</div>
+      </div>
+      <div id="strings-content"></div>
+    </section>
+  </div>
+
+  <footer>
+    <div class="disclaimer">
+      heuristic scanner — a clean result is <em>not</em> a guarantee of safety.
+      always cross-check the sha-256 on virustotal and prefer mods from modrinth,
+      curseforge, or the developer's own github.
+    </div>
+    <div>everything runs locally · no upload · v3.3</div>
+  </footer>
+
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<script>
+'use strict';
+
+// ─── Heuristic config ─────────────────────────────────────────────────────
+
+const KNOWN_BAD = {
+  '47079a34c45a94a173797c35c2336ff4732981871b48c29a8c0253d3dd1930ec':
+    "WeedHack/Krypton RAT family sample — obfuscated Minecraft session stealer/downloader with encrypted strings and staged network behavior."
+};
+
+// Legitimate clients can touch Minecraft session/auth classes for account UI,
+// profile display, multiplayer status, telemetry, alternate auth providers, etc.
+// Session-token strings are only suspicious when they share a class with hard
+// exfiltration/downloader evidence. This is intentionally behavior-based, not
+// a client-name allowlist.
+const BENIGN_SESSION_PREFIXES = [];
+
+const MINECRAFT_ACCOUNT_AUTH_HINTS = [
+  'login.live.com/oauth20', 'user.auth.xboxlive.com/user/authenticate',
+  'xsts.auth.xboxlive.com/xsts/authorize',
+  'api.minecraftservices.com/authentication/login_with_xbox',
+  'api.minecraftservices.com/entitlements/mcstore',
+  'api.minecraftservices.com/minecraft/profile',
+  'api.mojang.com', 'sessionserver.thealtening.com', 'authserver.thealtening.com'
+];
+
+// Known benign client-side translator code can legitimately combine outbound
+// HTTP with JSON/string helpers. These exceptions are narrow: they only apply
+// to Google-Translate-shaped classes/strings and never suppress credential,
+// webhook, downloader, native, persistence, or known-family malware evidence.
+const WURST_CLASS_PREFIX = 'net/wurstclient/';
+const WURST_GOOGLE_TRANSLATE_PREFIX = 'net/wurstclient/hacks/chattranslator/GoogleTranslate';
+const GOOGLE_TRANSLATE_CLASS_HINTS = ['googletranslate', 'googletranslator', 'google_translate'];
+const GOOGLE_TRANSLATE_STRING_HINTS = [
+  'translate.google.com', 'translate.googleapis.com', 'clients5.google.com/translate_a',
+  'translate_a/single', 'google translate', 'googletranslation', 'com/google/cloud/translate'
+];
+
+// Many legitimate mods include commands that open a Discord invite, wiki,
+// changelog, support page, or project website in the user's browser. Those
+// classes combine a URL string with Runtime.exec/ProcessBuilder on some
+// platforms (cmd /c start, open, xdg-open), but they are not droppers unless
+// they also contain real network-client, loader, credential, webhook, native,
+// or persistence behavior.
+const BROWSER_LAUNCHER_COMMAND_HINTS = [
+  'cmd /c start', 'rundll32 url.dll,fileprotocolhandler', 'explorer.exe',
+  'xdg-open', 'gio open', 'gnome-open', 'kde-open', 'open '
+];
+const BENIGN_EXTERNAL_LINK_HOST_HINTS = [
+  'discord.gg/', 'discord.com/invite/', 'aobaclient.com', 'github.com/',
+  'modrinth.com/', 'curseforge.com/', 'fabricmc.net/', 'minecraft.net/',
+  'youtube.com/', 'youtu.be/'
+];
+
+const SUSPICIOUS_REFS = {
+  // Session references are common in legitimate clients/mods (for example Wurst).
+  // They are no longer scored by themselves; scoring now requires a same-class
+  // exfiltration/downloader pattern below.
+  'session':    ['net/minecraft/class_320', 'MinecraftSessionService',
+                 'getAccessToken', 'accessToken', 'yggdrasil'],
+  // Only count APIs that imply outbound network capability. Plain java/net/URL
+  // is intentionally excluded because many safe mods use it to locate their
+  // own JAR/resources via CodeSource#getLocation(). Plain HTTP(S) strings are
+  // added to this category during URL extraction below.
+  'network':    ['java/net/http/HttpClient', 'java/net/Socket', 'javax/net/ssl',
+                 'java/net/HttpURLConnection', 'java/net/DatagramSocket',
+                 'java/net/URLConnection', 'openConnection'],
+  // Local browser GUI bridges are common in web-based mod UIs. These APIs
+  // create or serve localhost pages, decode query parameters, or open the
+  // user's browser; they are not outbound network clients by themselves.
+  'local_web':  ['com/sun/net/httpserver/HttpServer', 'com/sun/net/httpserver/HttpExchange',
+                 'com/sun/net/httpserver/Headers', 'java/net/InetSocketAddress',
+                 'java/net/URLDecoder', 'java/net/URLEncoder',
+                 'java/awt/Desktop', 'Desktop/browse'],
+  'process':    ['java/lang/Runtime', 'java/lang/ProcessBuilder', 'exec'],
+  'dynload':    ['defineClass', 'java/net/URLClassLoader'],
+  'crypto':     ['java/security/Signature', 'java/security/KeyFactory',
+                 'javax/crypto/Cipher', 'X509EncodedKeySpec', 'SHA256withRSA'],
+  'stackwalk':  ['java/lang/StackWalker', 'getCallerClass'],
+  'reflection': ['java/lang/reflect',
+                 'getDeclaredMethod', 'getDeclaredField', 'setAccessible', 'sun/misc/Unsafe'],
+  'encoding':   ['java/util/Base64', 'java/util/zip/GZIPInputStream',
+                 'java/util/zip/Inflater', 'java/util/zip/InflaterInputStream',
+                 'java/util/zip/ZipInputStream'],
+  'jarload':    ['java/util/jar/JarInputStream', 'java/util/jar/JarEntry'],
+  'native':     ['loadLibrary', 'System/load', 'java/lang/System/load'],
+  'systeminfo': ['os.name', 'os.arch', 'user.name', 'COMPUTERNAME',
+                 'PROCESSOR_IDENTIFIER', 'PROCESSOR_ARCHITECTURE'],
+  // Only credential/browser stores stay here; normal mod configuration paths,
+  // Discord RPC classes, and account-login features are excluded. Discord is
+  // matched only when it looks like the local token database path.
+  'fs_creds':   ['Login Data', 'Local State', 'Cookies',
+                 'Local Storage/leveldb', 'Local Storage\\leveldb',
+                 '.minecraft/launcher_accounts.json', 'discord-token-store'],
+  'persist':    ['javaw.exe', 'java.exe', 'Startup', 'currentversion\\run']
+};
+
+// All three patterns are used exclusively via String#matchAll below, which
+// returns a fresh iterator each call and ignores lastIndex. That fixes the
+// previous bug where a throw or early break in the scan loop could leave
+// URL_RE.lastIndex pointing into the middle of the next class's strings.
+// The URL pattern is length-capped so one giant URL-shaped blob in a
+// constant can't chew through hundreds of KB on a single match.
+const URL_RE = /https?:\/\/[A-Za-z0-9\-._~:/?#\[\]@!$&'()*+,;=%]{1,2048}/g;
+const ETH_RE = /0x[a-fA-F0-9]{40}\b/g;
+const IP_RE  = /(?<![\d.])(?:\d{1,3}\.){3}\d{1,3}(?![\d.])/g;
+
+// Trailing punctuation that's almost never part of the URL itself — sentence
+// endings, list separators, and the closing brackets/quotes around an
+// embedded URL. Stripped after matching so we don't have to bake brackets
+// into the character class itself (where they're actually URL-legal).
+const URL_TRAIL_RE = /[.,;:!?)\]}>'"`]+$/;
+
+function extractUrlsFromString(s) {
+  const out = [];
+  for (const m of String(s).matchAll(URL_RE)) {
+    const u = m[0].replace(URL_TRAIL_RE, '');
+    if (u.length > 'https://'.length) out.push(u);
+  }
+  return out;
+}
+
+const DOH_HINTS = ['cloudflare-dns.com', 'dns.google', '/dns-query', 'doh.'];
+const BLOCKCHAIN_HINTS = ['llamarpc','infura','alchemy','rpc.flashbots','ethereum','polygon',
+  'bsc-dataseed','drpc.org','publicnode','blastapi','tenderly','blockpi','mevblocker',
+  'nodereal','merkle.io','1rpc.io','eth-mainnet','etherscan','eth.'];
+
+const LEGIT_PREFIXES = [
+  'net/minecraft/','net/fabricmc/','com/mojang/','org/spongepowered/',
+  'com/google/','org/apache/','org/slf4j/','io/netty/','kotlin/',
+  'scala/','org/jetbrains/','javax/','java/','sun/','com/sun/',
+  'jdk/','META-INF/','org/lwjgl/','it/unimi/dsi/fastutil/',
+  'com/electronwill/','joptsimple/','org/objectweb/asm/',
+  'com/llamalad7/','fuzs/','dev/architectury/'
+];
+
+// ─── Cooperative scheduling ───────────────────────────────────────────────
+
+// Browsers single-thread JS, so a long scan loop blocks paints, clicks, and
+// animations until it finishes. Web Workers would solve this in theory, but
+// they're blocked on file:// origins in Chrome and Firefox, so they're not
+// an option for a single-HTML-file tool. Instead we yield to the event loop
+// every ~32 classes during the scan. The browser gets a chance to repaint
+// (so the progress counter actually updates), and we resume from where we
+// left off.
+//
+// We yield via MessageChannel rather than setTimeout(0) because the HTML5
+// spec clamps nested setTimeout calls to a 4ms minimum after a few nests.
+// MessageChannel.postMessage has no such clamp — it resumes on the next
+// microtask boundary, which is the fastest yield that still lets the
+// browser repaint.
+const __yieldChannel = (typeof MessageChannel !== 'undefined') ? new MessageChannel() : null;
+function yieldToEventLoop() {
+  if (__yieldChannel) {
+    return new Promise(resolve => {
+      __yieldChannel.port1.onmessage = () => resolve();
+      __yieldChannel.port2.postMessage(0);
+    });
+  }
+  // Fallback for environments without MessageChannel (very old browsers,
+  // some test runners). The 0ms timer will still be clamped, but works.
+  return new Promise(resolve => setTimeout(resolve, 0));
+}
+
+// Yield interval — small enough that the UI stays responsive (~60fps target
+// is one frame every 16ms; at ~5ms per class scan that's ~3 classes per
+// frame, but we want some headroom), large enough that yield overhead
+// doesn't dominate runtime.
+const SCAN_YIELD_EVERY = 32;
+
+// Simple progress reporter. Pass to scan() / scanJavaSource() so they can
+// update the drop-zone counter without coupling them to the DOM directly.
+function makeProgressReporter() {
+  const el = document.getElementById('progress');
+  let last = 0;
+  return function setProgress(current, total, label) {
+    if (!el) return;
+    // Throttle DOM writes — even though we yield, we don't need to repaint
+    // the counter on every single class. Once every ~50ms is plenty.
+    const now = (typeof performance !== 'undefined') ? performance.now() : Date.now();
+    if (current < total && now - last < 50) return;
+    last = now;
+    if (total > 0) {
+      const pct = Math.floor((current / total) * 100);
+      el.textContent = `${label || 'scanning'} ${current.toLocaleString()} / ${total.toLocaleString()} · ${pct}%`;
+    } else {
+      el.textContent = label || '';
+    }
+  };
+}
+
+
+
+// ─── Helpers ──────────────────────────────────────────────────────────────
+
+// Java class files use *modified* UTF-8, not standard UTF-8:
+//   • U+0000 is encoded as 0xC0 0x80 (two bytes), never as a single null
+//     byte — so plain UTF-8 decoders also work for most strings but mangle
+//     constants that contain embedded nulls.
+//   • Characters above U+FFFF are encoded as TWO 3-byte groups representing
+//     the UTF-16 surrogate pair, never as a 4-byte sequence.
+// Because JS strings are UTF-16 internally, those surrogates fall out of
+// this decoder naturally and form valid surrogate pairs in the result
+// without any reassembly step.
+//
+// For malware triage almost every interesting constant (URLs, class names,
+// JVM descriptors) is pure ASCII, so the previous Latin-1 cast was fine in
+// practice. This exists so that non-ASCII strings — i18n bundles, file
+// paths with extended characters, non-ASCII obfuscator output — decode
+// correctly and don't produce spurious high-entropy hits from mojibake.
+function decodeModifiedUtf8(arr) {
+  let s = '';
+  const n = arr.length;
+  let i = 0;
+  while (i < n) {
+    const b1 = arr[i++];
+    if (b1 < 0x80) {
+      s += String.fromCharCode(b1);
+    } else if ((b1 & 0xE0) === 0xC0) {
+      if (i >= n) { s += '\uFFFD'; break; }
+      const b2 = arr[i++];
+      s += String.fromCharCode(((b1 & 0x1F) << 6) | (b2 & 0x3F));
+    } else if ((b1 & 0xF0) === 0xE0) {
+      if (i + 1 >= n) { s += '\uFFFD'; break; }
+      const b2 = arr[i++];
+      const b3 = arr[i++];
+      s += String.fromCharCode(((b1 & 0x0F) << 12) | ((b2 & 0x3F) << 6) | (b3 & 0x3F));
+    } else {
+      // Continuation byte at a leading position, or a 4-byte sequence (which
+      // modified UTF-8 forbids — supplementary chars use the surrogate
+      // encoding above). Emit U+FFFD and resync at the next byte.
+      s += '\uFFFD';
+    }
+  }
+  return s;
+}
+
+function isLegitPackage(p) {
+  for (const pref of LEGIT_PREFIXES) if (p.startsWith(pref)) return true;
+  return false;
+}
+
+function isBenignSessionClass(cn) {
+  return BENIGN_SESSION_PREFIXES.some(pref => cn.startsWith(pref));
+}
+
+function classSetHas(hits, cat) {
+  return hits && typeof hits.has === 'function' && hits.has(cat);
+}
+
+function isWurstClass(cn) {
+  return String(cn || '').startsWith(WURST_CLASS_PREFIX);
+}
+
+function isKnownWurstGoogleTranslateClass(cn) {
+  const n = String(cn || '').replace(/\.class$/, '');
+  return n === WURST_GOOGLE_TRANSLATE_PREFIX || n.startsWith(WURST_GOOGLE_TRANSLATE_PREFIX + '$');
+}
+
+function hasGoogleTranslateClassName(cn) {
+  const n = classToJavaName(cn).toLowerCase();
+  return GOOGLE_TRANSLATE_CLASS_HINTS.some(h => n.includes(h));
+}
+
+function hasGoogleTranslateString(str) {
+  const s = String(str || '').toLowerCase();
+  return GOOGLE_TRANSLATE_STRING_HINTS.some(h => s.includes(h));
+}
+
+function hasMinecraftAccountAuthString(str) {
+  const s = String(str || '').toLowerCase();
+  return MINECRAFT_ACCOUNT_AUTH_HINTS.some(h => s.includes(h));
+}
+
+function hasBrowserLauncherCommandString(str) {
+  const s = String(str || '').toLowerCase();
+  return BROWSER_LAUNCHER_COMMAND_HINTS.some(h => s.includes(h));
+}
+
+function isLikelyBenignExternalLink(url) {
+  const s = String(url || '').toLowerCase();
+  return BENIGN_EXTERNAL_LINK_HOST_HINTS.some(h => s.includes(h));
+}
+
+function isBenignMinecraftAccountAuthClass(cn, stats, hits) {
+  if (!classSetHas(hits, 'session') || !classSetHas(hits, 'network')) return false;
+  if (!stats || stats.authHints <= 0) return false;
+
+  // Do not suppress if the same class also looks like an exfil/dropper class.
+  // Local OAuth callback servers are fine; webhook/dynamic/native/persistence
+  // or browser credential-store access are not.
+  if (['fs_creds', 'webhook', 'dynload', 'jarload', 'native', 'persist'].some(cat => classSetHas(hits, cat))) return false;
+
+  const n = classToJavaName(cn).toLowerCase();
+  const accountNameHint = ['account', 'login', 'auth', 'microsoft', 'altening', 'session'].some(h => n.includes(h));
+  return accountNameHint || stats.authHints >= 2;
+}
+
+function hasHardSessionExfilClassSignal(cn, stats, hits) {
+  if (!classSetHas(hits, 'session') || !classSetHas(hits, 'network')) return false;
+  if (isBenignMinecraftAccountAuthClass(cn, stats, hits)) return false;
+
+  if (classSetHas(hits, 'fs_creds') || classSetHas(hits, 'webhook') ||
+      classSetHas(hits, 'dynload') || classSetHas(hits, 'jarload') ||
+      classSetHas(hits, 'native') || classSetHas(hits, 'persist')) return true;
+
+  const payloadLikeSession = stats && stats.highEntropy >= 8 &&
+    (classSetHas(hits, 'reflection') || classSetHas(hits, 'encoding') || classSetHas(hits, 'stackwalk'));
+  if (payloadLikeSession) return true;
+
+  const rawEndpointSession = stats && (stats.ips > 0 || stats.eth > 0) && !stats.authHints;
+  return !!rawEndpointSession;
+}
+
+// Class.forName("java.lang.Foo") and similar dynamic-dispatch patterns load
+// a class by its DOTTED name as a string literal, bypassing the imports and
+// JVM constant-pool reference forms our other rules look for. Rare in
+// legitimate code (mostly serialization or plugin systems), very common in
+// malware that hides which APIs it touches. So when a SUSPICIOUS_REFS
+// pattern is in JVM-internal form (a/b/C), we also check the dotted form
+// (a.b.C) in the string — with word-style boundaries so we don't false-
+// positive on overlapping names like `java.lang.RuntimeException` colliding
+// with the `java.lang.Runtime` pattern.
+function dottedFormMatchesString(s, p) {
+  if (!p || !p.includes('/')) return false;
+  const dotted = p.replace(/\//g, '.');
+  const escaped = dotted.replace(/\./g, '\\.');
+  // Use negative lookbehind/lookahead so the match isn't a sub-identifier of
+  // a longer dotted name. `\w` and `$` are the JVM-source identifier chars.
+  return new RegExp('(?<![\\w$])' + escaped + '(?![\\w$])').test(String(s || ''));
+}
+
+function matchesSuspiciousRef(cat, ss, p) {
+  const s = String(ss || '');
+
+  if (cat === 'fs_creds') {
+    const l = s.toLowerCase().replace(/\\/g, '/');
+    if (p === 'discord-token-store') {
+      return (l.includes('discord') || l.includes('discordcanary') || l.includes('discordptb')) &&
+        (l.includes('local storage/leveldb') || l.includes('/appdata/') || l.includes('appdata/') || l.includes('.config/discord'));
+    }
+    if (p === 'Login Data') return l.includes('login data');
+    if (p === 'Local State') return l.includes('local state');
+    if (p === 'Cookies') return l.includes('cookies') && (l.includes('chrome') || l.includes('edge') || l.includes('brave') || l.includes('browser') || l.includes('appdata') || l.includes('.config'));
+    if (p === 'Local Storage/leveldb' || p === 'Local Storage\\leveldb') return l.includes('local storage/leveldb');
+    if (p === '.minecraft/launcher_accounts.json') return l.includes('.minecraft/launcher_accounts.json');
+  }
+
+  // Avoid substring false positives such as:
+  //   exec -> execute / executor
+  //   java/lang/Runtime -> java/lang/RuntimeException
+  //   com/mojang/authlib -> normal GameProfile usage
+  if (cat === 'process') {
+    if (p === 'exec') return s === 'exec';
+    if (p === 'java/lang/Runtime') {
+      return s === 'java/lang/Runtime' ||
+        /(^|[;(\[])Ljava\/lang\/Runtime;/.test(s) ||
+        /(^|[;(\[])java\/lang\/Runtime([;)\[]|$)/.test(s) ||
+        dottedFormMatchesString(s, p);
+    }
+    if (p === 'java/lang/ProcessBuilder') {
+      return s === 'java/lang/ProcessBuilder' ||
+        /(^|[;(\[])Ljava\/lang\/ProcessBuilder;/.test(s) ||
+        /(^|[;(\[])java\/lang\/ProcessBuilder([;)\[]|$)/.test(s) ||
+        dottedFormMatchesString(s, p);
+    }
+  }
+
+  if (cat === 'reflection') {
+    // Java compilers emit MethodHandles bootstrap descriptors for lambdas and
+    // string concatenation. Those are not reflection/unsafe behavior by
+    // themselves, so MethodHandles is intentionally not a suspicious pattern.
+    if (p === 'getDeclaredMethod' || p === 'getDeclaredField' || p === 'setAccessible') {
+      return s === p || s.includes(p);
+    }
+  }
+
+  if (cat === 'session') {
+    // GameProfile/Authlib references are normal for client features like staff
+    // lists, skins, or profile display. Only session-token shaped strings count.
+    if (p === 'getAccessToken' || p === 'accessToken') return s === p || s.includes(p);
+  }
+
+  // Generic Class.forName-style catch for any JVM-internal-form pattern that
+  // didn't get a specialised handler above.
+  if (dottedFormMatchesString(s, p)) return true;
+  return s.includes(p);
+}
+
+function isKnownGoogleTranslateClientClass(cn, stats, hits) {
+  const hasTranslateShape = hasGoogleTranslateClassName(cn) || (stats && stats.translationHints > 0);
+  if (!hasTranslateShape) return false;
+
+  // A translator normally needs network APIs or plaintext Google Translate URLs.
+  // Do not suppress random classes named Translator unless they actually look
+  // like a Google Translate client.
+  const hasNetworkOrEndpoint = classSetHas(hits, 'network') || (stats && stats.translationHints > 0);
+  if (!hasNetworkOrEndpoint) return false;
+
+  // If malware evidence is present, the translator name/URL is no longer enough
+  // to suppress the finding.
+  if (hasHardMalwareClassSignal(hits)) return false;
+  return true;
+}
+
+function isKnownWurstProfile(ctx) {
+  const names = (ctx && ctx.names) || [];
+  const j = (ctx && ctx.fabricJson) || {};
+  return hasWurstEntrypoint(j.entrypoints) ||
+    isWurstModMenuContact(j.contact) ||
+    countPrefix(names, WURST_CLASS_PREFIX) >= 25;
+}
+
+function hasHardMalwareClassSignal(hits) {
+  return ['fs_creds', 'webhook', 'dynload', 'jarload', 'native', 'persist'].some(cat => classSetHas(hits, cat));
+}
+
+function isLocalWebUiBridgeClass(cn, stats, hits) {
+  if (!classSetHas(hits, 'local_web')) return false;
+  if (hasHardMalwareClassSignal(hits)) return false;
+  // A local web UI may pair HttpServer/Desktop/URLDecoder with ProcessBuilder
+  // to open the default browser. Do not suppress classes that also perform
+  // outbound HTTP/socket use; those are handled by the normal scoring path.
+  if (classSetHas(hits, 'network')) return false;
+  return true;
+}
+
+function isExternalBrowserLauncherClass(cn, stats, hits) {
+  if (!classSetHas(hits, 'process')) return false;
+  if (!stats || stats.urls <= 0 || stats.browserLaunchHints <= 0) return false;
+
+  // Opening a known project/support/community URL with the OS default browser
+  // is benign context. Do not suppress classes that also have actual network
+  // client APIs, loaders, credential stores, webhooks, native loading, or
+  // persistence. This fixes Aoba-style `.discord` commands without trusting
+  // Aoba by name.
+  if (hasHardMalwareClassSignal(hits)) return false;
+  if (stats.networkApiRefs > 0) return false;
+  if (stats.suspiciousUrls > 0 || stats.ips > 0 || stats.eth > 0) return false;
+  return stats.benignLinkUrls > 0;
+}
+
+function shouldSuppressKnownBenignClassSignal(cn, stats, hits, opts = {}) {
+  if (hasHardMalwareClassSignal(hits)) return false;
+
+  // Any clearly Google-Translate-shaped client class is allowed to use network,
+  // JSON/string/encoding, reflection, or virtual-thread-adjacent runtime helpers
+  // without becoming a RAT cluster by itself. This is not Wurst-specific and is
+  // not a broad Wurst/client allowlist.
+  if (isKnownGoogleTranslateClientClass(cn, stats, hits)) return true;
+
+  // Web-browser GUI mods often host assets on localhost and launch the browser.
+  // That can look like network+process when constants are obfuscated, but it is
+  // not a dropper unless outbound network, loaders, credentials, webhooks, etc.
+  // are present.
+  if (isLocalWebUiBridgeClass(cn, stats, hits)) return true;
+
+  // Cross-platform "open this Discord/GitHub/wiki URL" commands often combine
+  // os.name + Runtime.exec with a URL. That is a browser launcher, not an
+  // outbound network/process malware cluster.
+  if (isExternalBrowserLauncherClass(cn, stats, hits)) return true;
+
+  return false;
+}
+
+function shouldSuppressKnownWurstClassSignal(cn, stats, hits, isWurstProfile) {
+  return shouldSuppressKnownBenignClassSignal(cn, stats, hits, { isWurstProfile });
+}
+
+function looksObfuscated(name) {
+  if (!name) return false;
+  const n = name.split('$')[0];
+  if (n.length <= 2) return true;
+  let transitions = 0;
+  for (let i = 1; i < n.length; i++) {
+    if ((n[i] === n[i].toUpperCase()) !== (n[i-1] === n[i-1].toUpperCase())) transitions++;
+  }
+  if (transitions >= 3 && n.length <= 10) return true;
+  const letters = [...n.toLowerCase()].filter(c => /[a-z]/.test(c));
+  if (letters.length >= 4) {
+    const vowels = letters.filter(c => 'aeiou'.includes(c)).length;
+    if (vowels / letters.length < 0.18) return true;
+  }
+  return false;
+}
+
+function shannonEntropy(str) {
+  if (!str) return 0;
+  const counts = new Map();
+  for (const ch of str) counts.set(ch, (counts.get(ch) || 0) + 1);
+  let entropy = 0;
+  for (const c of counts.values()) {
+    const p = c / str.length;
+    entropy -= p * Math.log2(p);
+  }
+  return entropy;
+}
+
+function longestRun(str, re) {
+  let best = 0, cur = 0;
+  for (const ch of str) {
+    if (re.test(ch)) { cur++; best = Math.max(best, cur); }
+    else cur = 0;
+  }
+  return best;
+}
+
+function obfuscationNameScore(name) {
+  if (!name) return 0;
+  const base = String(name).replace(/\.class$/, '').split('$')[0];
+  if (!base) return 0;
+  let score = 0;
+  const lower = base.toLowerCase();
+  const letters = [...lower].filter(c => /[a-z]/.test(c));
+  const digits = [...base].filter(c => /\d/.test(c));
+  const vowels = letters.filter(c => 'aeiou'.includes(c)).length;
+  const vowelRatio = letters.length ? vowels / letters.length : 0;
+
+  if (base.length <= 2) score += 35;
+  if (base.length >= 7 && /^a{4,}[a-z0-9_$]*$/i.test(base)) score += 35;
+  if (letters.length >= 4 && vowelRatio < 0.18) score += 25;
+  if (longestRun(lower, /[bcdfghjklmnpqrstvwxyz]/) >= 5) score += 20;
+  if (digits.length >= 3 && digits.length / base.length > 0.25) score += 15;
+  if (/[Il1O0]{4,}/.test(base)) score += 15;
+  if (shannonEntropy(base) > 3.2 && base.length <= 14) score += 15;
+  if (/^(class|module|client|manager|handler|config|mixin|screen|renderer)$/i.test(base)) score -= 25;
+  return Math.max(0, Math.min(100, score));
+}
+
+function looksObfuscatedClass(cn) {
+  const parts = String(cn || '').split('/');
+  const simple = parts[parts.length - 1].replace(/\.class$/, '');
+  return obfuscationNameScore(simple) >= 45;
+}
+
+function looksLikeJvmInternalName(str) {
+  const s = String(str || '').trim();
+  return /^[A-Za-z_$][\w$]*(?:\/[A-Za-z_$][\w$]*)+$/.test(s);
+}
+
+function looksLikeDottedClassName(str) {
+  const s = String(str || '').trim();
+  return /^[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)+$/.test(s);
+}
+
+function isLikelyJvmMetadataString(str) {
+  const s = String(str || '').trim();
+  if (!s) return false;
+  if (looksLikeJvmInternalName(s) || looksLikeDottedClassName(s)) return true;
+
+  // JVM descriptors/signatures often look random to entropy checks, e.g.
+  // (Ljava/lang/invoke/MethodHandles$Lookup;...)Ljava/lang/invoke/CallSite;
+  // or Ljava/util/Map<Ljava/lang/String;...>; These are metadata, not payloads.
+  const descriptorChars = /^[()\[\]BCDFIJSZV;<>/+\-A-Za-z0-9_$./*]+$/;
+  if ((s.startsWith('(') || s.startsWith('L') || s.startsWith('[')) &&
+      (s.includes(';') || s.includes('/')) && descriptorChars.test(s)) return true;
+  if (/L[A-Za-z_$][\w$]*(?:\/[\w$]+)+;/.test(s) && descriptorChars.test(s)) return true;
+
+  if (/^(RuntimeVisible|RuntimeInvisible).*|BootstrapMethods|InnerClasses|SourceFile|LineNumberTable|LocalVariableTable|LocalVariableTypeTable|StackMapTable|Signature|EnclosingMethod|NestMembers|Record|Module|Code$/.test(s)) return true;
+  if (/\.(class|java|json|png|mcmeta|txt|ttf|jar|toml|fsh|vsh|properties|accesswidener)$/i.test(s)) return true;
+  return false;
+}
+
+function isLikelyHumanText(str) {
+  const s = String(str || '');
+  if (s.length < 32 || !/\s/.test(s)) return false;
+  const letters = [...s.toLowerCase()].filter(c => /[a-z]/.test(c));
+  if (letters.length < 12) return false;
+  const vowels = letters.filter(c => 'aeiou'.includes(c)).length;
+  return vowels / letters.length > 0.25;
+}
+
+function isBenignConstantString(str) {
+  return isLikelyJvmMetadataString(str) || isLikelyHumanText(str);
+}
+
+function looksEncodedAscii(str) {
+  const s = String(str || '').trim();
+  if (s.length < 32 || isBenignConstantString(s)) return false;
+
+  // Avoid treating internal class names like net/fabricmc/loader/api/FabricLoader
+  // as Base64 just because '/' is legal in Base64.
+  if (/^[A-Za-z0-9+/]{32,}={0,2}$/.test(s) && s.length % 4 === 0) {
+    return s.includes('+') || s.includes('/') || s.includes('=') || shannonEntropy(s) > 4.7;
+  }
+  if (/^[a-fA-F0-9]{48,}$/.test(s) && s.length % 2 === 0) return true;
+  if (/^[A-Za-z0-9_\-]{48,}$/.test(s) && shannonEntropy(s) > 4.7) return true;
+  return false;
+}
+
+function looksSuspiciousHighEntropyString(rawBytes, decoded) {
+  const s = String(decoded || '');
+  if (!rawBytes || rawBytes.length < 24 || isBenignConstantString(s)) return false;
+
+  let nonPrintable = 0;
+  for (let k = 0; k < rawBytes.length; k++) {
+    if (rawBytes[k] < 32 || rawBytes[k] > 126) nonPrintable++;
+  }
+  if (nonPrintable / rawBytes.length > 0.5) return true;
+
+  // Printable constants produce many false positives in normal mods (generic
+  // signatures, generated GUI strings, serialized config defaults). Only count
+  // printable strings as payload-like when they have a recognized encoded shape
+  // such as Base64/hex/URL-safe blobs; otherwise leave them to the encoded
+  // counter and context scoring.
+  return looksEncodedAscii(s);
+}
+
+function classRiskTier(score) {
+  if (score >= 70) return 'high';
+  if (score >= 45) return 'medium';
+  return 'low';
+}
+
+function makeClassStats(cn) {
+  const parts = String(cn || '').split('/');
+  const simple = parts[parts.length - 1].replace(/\.class$/, '');
+  return {
+    className: cn,
+    simpleName: simple,
+    nameScore: obfuscationNameScore(simple),
+    stringCount: 0,
+    byteCount: 0,
+    highEntropy: 0,
+    encoded: 0,
+    urls: 0,
+    ips: 0,
+    eth: 0,
+    translationHints: 0,
+    authHints: 0,
+    browserLaunchHints: 0,
+    benignLinkUrls: 0,
+    suspiciousUrls: 0,
+    networkApiRefs: 0,
+    suspiciousTerms: 0,
+    bytecodeHits: []   // per-class list of {cat, label, owner, name, desc, form}
+  };
+}
+
+function classRiskBreakdown(cn, stats, hits) {
+  const cats = hits || new Set();
+  const has = cat => cats.has(cat);
+  let score = 0;
+  const reasons = [];
+  function add(points, reason) {
+    score += points;
+    if (reason) reasons.push(reason);
+  }
+
+  const realOutboundNetwork = has('network') && ((stats && stats.networkApiRefs > 0) || (stats && stats.suspiciousUrls > 0) || (stats && stats.ips > 0) || has('webhook'));
+  if (realOutboundNetwork && has('dynload')) add(45, 'network loader');
+  if (realOutboundNetwork && has('process') && (has('webhook') || has('dynload') || has('jarload') || has('persist') || has('fs_creds') || (stats && stats.suspiciousUrls > 0) || (stats && stats.ips > 0))) add(35, 'network + process spawn');
+  if (has('fs_creds') && has('network')) add(42, 'credential path + network');
+  if (hasHardSessionExfilClassSignal(cn, stats, cats)) add(42, 'session + exfil cluster');
+  if (has('webhook')) add(has('fs_creds') ? 35 : 22, 'webhook/paste endpoint');
+  if (has('jarload') && (has('reflection') || has('dynload') || stats.highEntropy >= 5)) add(30, 'embedded jar/resource loader');
+  const payloadLikeConstants = stats.encoded >= 2 || stats.highEntropy >= 2;
+  const hardPayloadContext = has('dynload') || has('jarload') || has('webhook') ||
+    (has('fs_creds') && has('network')) ||
+    (realOutboundNetwork && payloadLikeConstants && ((stats && stats.suspiciousUrls > 0) || (stats && stats.ips > 0)));
+  if (has('reflection') && payloadLikeConstants && (has('encoding') || has('stackwalk') || hardPayloadContext) && hardPayloadContext) add(25, 'reflection + encoded strings');
+  else if (has('reflection') && has('jarload') && (has('dynload') || payloadLikeConstants)) add(25, 'reflection + resource loader');
+  if (has('stackwalk') && stats.highEntropy >= 2 && hardPayloadContext) add(25, 'caller-keyed decryptor shape');
+  if (has('native') && (has('network') || has('persist'))) add(22, 'native load with risky behavior');
+  if (has('systeminfo') && (realOutboundNetwork || has('webhook') || (has('fs_creds') && realOutboundNetwork))) add(14, 'system fingerprint + outbound path');
+  if (stats.highEntropy >= 8 && hardPayloadContext) add(25, 'many high-entropy constants');
+  else if (stats.highEntropy >= 3 && hardPayloadContext) add(14, 'some high-entropy constants');
+  if (stats.encoded >= 8 && hardPayloadContext) add(18, 'many encoded constants');
+  else if (stats.encoded >= 3 && hardPayloadContext) add(10, 'encoded constants');
+  if (stats.nameScore >= 70 && (has('network') || has('dynload') || has('reflection') || has('encoding') || stats.highEntropy >= 2) && hardPayloadContext) add(18, 'obfuscated risky class');
+  else if (stats.nameScore >= 45 && (has('network') || has('dynload') || stats.highEntropy >= 2) && hardPayloadContext) add(10, 'renamed suspicious class');
+
+  return { className: cn, score: Math.min(100, score), tier: classRiskTier(score), reasons: [...new Set(reasons)].slice(0, 8), stats };
+}
+
+function summarizeClassRisks(classStats, classHits, opts = {}) {
+  const risks = [];
+  const isWurstProfile = !!opts.isWurstProfile;
+  for (const [cn, stats] of Object.entries(classStats || {})) {
+    const hits = classHits[cn] || new Set();
+    if (shouldSuppressKnownBenignClassSignal(cn, stats, hits, { isWurstProfile })) continue;
+    const risk = classRiskBreakdown(cn, stats, hits);
+    if (risk.score >= 25) risks.push(risk);
+  }
+  return risks.sort((a, b) => b.score - a.score || a.className.localeCompare(b.className)).slice(0, 12);
+}
+
+function topRiskSummary(risks) {
+  if (!risks || !risks.length) return 'No concentrated high-risk behavior cluster was found.';
+  const top = risks[0];
+  return `${compactClassName(top.className)} scored ${top.score}/100 (${top.reasons.join(', ') || 'supporting suspicious evidence'}).`;
+}
+
+// Parse class-file constant pool. Returns { strings, partial, partialReason }.
+// `partial` is true if we stopped before reading the full constant pool —
+// either because the file was truncated or because we hit a tag this parser
+// doesn't know how to size. We can't safely skip unknown tags (we don't
+// know their length), so we keep what we've already extracted and let the
+// caller surface a note.
+//
+// This is also a faint malware signal on its own: a maliciously crafted
+// class file can inject a bogus tag to make naive scanners bail early and
+// score the file as clean.
+function parseConstantPoolStrings(buf) {
+  if (buf.byteLength < 10) {
+    return { strings: [], partial: true, partialReason: 'file too small for class header' };
+  }
+  const dv = new DataView(buf);
+  if (dv.getUint32(0) !== 0xcafebabe) {
+    return { strings: [], partial: true, partialReason: 'missing CAFEBABE magic' };
+  }
+  const u8 = new Uint8Array(buf);
+  let off = 10;
+  const count = dv.getUint16(8);
+  const strings = [];
+  let i = 1;
+  try {
+    while (i < count) {
+      if (off >= dv.byteLength) {
+        return { strings, partial: true, partialReason: `truncated at CP entry ${i}/${count - 1}` };
+      }
+      const tag = dv.getUint8(off++);
+      if (tag === 1) {                                  // CONSTANT_Utf8
+        const n = dv.getUint16(off); off += 2;
+        strings.push(u8.subarray(off, off + n));
+        off += n;
+      } else if (tag === 3 || tag === 4 ||              // Integer, Float
+                 tag === 9 || tag === 10 || tag === 11 ||// Fieldref/Methodref/InterfaceMethodref
+                 tag === 12 ||                          // NameAndType
+                 tag === 17 || tag === 18) {            // Dynamic (JDK11+), InvokeDynamic
+        off += 4;
+      } else if (tag === 5 || tag === 6) {              // Long, Double — take TWO CP slots
+        off += 8; i++;
+      } else if (tag === 7 || tag === 8 ||              // Class, String
+                 tag === 16 ||                          // MethodType
+                 tag === 19 || tag === 20) {            // Module, Package (JDK9+)
+        off += 2;
+      } else if (tag === 15) {                          // MethodHandle
+        off += 3;
+      } else {
+        // Unknown tag — likely a class-file feature added after this parser
+        // was written, or (less innocently) a bogus tag injected to make us
+        // give up. We can't size it, so we stop here and report partial.
+        return {
+          strings,
+          partial: true,
+          partialReason: `unknown CP tag ${tag} at byte ${off - 1}, entry ${i}/${count - 1}`
+        };
+      }
+      i++;
+    }
+  } catch (e) {
+    return {
+      strings,
+      partial: true,
+      partialReason: 'parse error: ' + (e && e.message ? e.message : String(e))
+    };
+  }
+  return { strings, partial: false, partialReason: null };
+}
+
+// ─── Bytecode-level scanning ───────────────────────────────────────────────
+//
+// parseConstantPoolStrings above only returns Utf8 entries, which is enough
+// to catch obvious string-literal evidence (URLs, class names spelled out,
+// Login Data, webhook endpoints). It can NOT see actual method calls — a
+// class can invoke java.lang.Runtime.exec without the string "exec" being
+// in any Utf8 entry that isn't also referenced from a Methodref. More
+// importantly, an INVOKEVIRTUAL of `java/lang/Runtime#exec(String)String`
+// references *separate* Utf8 entries for the owner ("java/lang/Runtime"),
+// name ("exec"), and descriptor — but a name like "exec" alone is too
+// generic to score without context. The previous string scanner threw
+// away that context.
+//
+// parseClassFileForBytecode returns the same Utf8 string list AS WELL AS:
+//   - a list of resolved invoke triples: [{op, owner, name, desc}, ...]
+//   - a list of `new X` instructions: [{owner}, ...]
+//   - a list of LDC'd Class constants: [{owner}, ...]
+// We dedupe within a class so the scoring loop doesn't double-count when
+// the same method is called 50 times. Result shape stays compatible with
+// the existing parseConstantPoolStrings consumer via the .strings field.
+
+// Each entry: instruction length in bytes including the opcode. Variable-
+// length opcodes (tableswitch=0xAA, lookupswitch=0xAB, wide=0xC4) are
+// handled specially in the walker, not in this table.
+const OP_LEN = (() => {
+  const m = new Array(256).fill(1);
+  const lens = {
+    0x10: 2, 0x12: 2, 0x15: 2, 0x16: 2, 0x17: 2, 0x18: 2, 0x19: 2,
+    0x36: 2, 0x37: 2, 0x38: 2, 0x39: 2, 0x3A: 2,
+    0xA9: 2, 0xBC: 2,
+    0x11: 3, 0x13: 3, 0x14: 3,
+    0x84: 3,
+    0x99: 3, 0x9A: 3, 0x9B: 3, 0x9C: 3, 0x9D: 3, 0x9E: 3,
+    0x9F: 3, 0xA0: 3, 0xA1: 3, 0xA2: 3, 0xA3: 3, 0xA4: 3, 0xA5: 3, 0xA6: 3,
+    0xA7: 3, 0xA8: 3,
+    0xB2: 3, 0xB3: 3, 0xB4: 3, 0xB5: 3,
+    0xB6: 3, 0xB7: 3, 0xB8: 3,
+    0xBB: 3, 0xBD: 3, 0xC0: 3, 0xC1: 3,
+    0xC6: 3, 0xC7: 3,
+    0xC5: 4,
+    0xB9: 5, 0xBA: 5,
+    0xC8: 5, 0xC9: 5,
+  };
+  for (const op in lens) m[+op] = lens[op];
+  return m;
+})();
+
+function parseClassFileForBytecode(buf) {
+  const result = {
+    strings: [],
+    invokes: [],     // { op: 'INVOKEVIRTUAL'|'INVOKESTATIC'|..., owner, name, desc }
+    newInstances: [],// { owner }
+    classConsts: [], // { owner }   -- LDC of a CONSTANT_Class
+    partial: false,
+    partialReason: null
+  };
+  if (buf.byteLength < 10) {
+    result.partial = true; result.partialReason = 'file too small for class header';
+    return result;
+  }
+  const dv = new DataView(buf);
+  if (dv.getUint32(0) !== 0xcafebabe) {
+    result.partial = true; result.partialReason = 'missing CAFEBABE magic';
+    return result;
+  }
+  const u8 = new Uint8Array(buf);
+
+  // Pass 1: read every constant-pool entry into an indexed array. We keep
+  // it structured so that Class/Methodref/InterfaceMethodref/NameAndType
+  // can be resolved later. Utf8 is decoded modified-UTF8 here on demand.
+  const cp = new Array(1);
+  let off = 10;
+  const cpCount = dv.getUint16(8);
+  let i = 1;
+  try {
+    while (i < cpCount) {
+      if (off >= dv.byteLength) {
+        result.partial = true;
+        result.partialReason = `truncated at CP entry ${i}/${cpCount - 1}`;
+        return result;
+      }
+      const tag = dv.getUint8(off++);
+      if (tag === 1) {
+        const n = dv.getUint16(off); off += 2;
+        const bytes = u8.subarray(off, off + n); off += n;
+        cp[i] = { tag, bytes };
+      } else if (tag === 3) {
+        cp[i] = { tag, intValue: dv.getInt32(off) }; off += 4;
+      } else if (tag === 4) {
+        cp[i] = { tag, floatValue: dv.getFloat32(off) }; off += 4;
+      } else if (tag === 5) {
+        // Long takes two CP slots
+        cp[i] = { tag }; off += 8; i++;
+      } else if (tag === 6) {
+        cp[i] = { tag }; off += 8; i++;
+      } else if (tag === 7) {
+        cp[i] = { tag, nameIndex: dv.getUint16(off) }; off += 2;
+      } else if (tag === 8) {
+        cp[i] = { tag, stringIndex: dv.getUint16(off) }; off += 2;
+      } else if (tag === 9 || tag === 10 || tag === 11) {
+        cp[i] = { tag, classIndex: dv.getUint16(off), nameAndTypeIndex: dv.getUint16(off + 2) }; off += 4;
+      } else if (tag === 12) {
+        cp[i] = { tag, nameIndex: dv.getUint16(off), descriptorIndex: dv.getUint16(off + 2) }; off += 4;
+      } else if (tag === 15) {
+        cp[i] = { tag, refKind: dv.getUint8(off), refIndex: dv.getUint16(off + 1) }; off += 3;
+      } else if (tag === 16) {
+        cp[i] = { tag, descriptorIndex: dv.getUint16(off) }; off += 2;
+      } else if (tag === 17 || tag === 18) {
+        cp[i] = { tag, bootstrapMethodAttrIndex: dv.getUint16(off), nameAndTypeIndex: dv.getUint16(off + 2) }; off += 4;
+      } else if (tag === 19 || tag === 20) {
+        cp[i] = { tag, nameIndex: dv.getUint16(off) }; off += 2;
+      } else {
+        result.strings = utf8Strings(cp);
+        result.partial = true;
+        result.partialReason = `unknown CP tag ${tag} at byte ${off - 1}, entry ${i}/${cpCount - 1}`;
+        return result;
+      }
+      i++;
+    }
+  } catch (e) {
+    result.strings = utf8Strings(cp);
+    result.partial = true;
+    result.partialReason = 'parse error during CP: ' + (e && e.message ? e.message : String(e));
+    return result;
+  }
+
+  // Resolution helpers — return null if anything looks malformed.
+  function utf8At(idx) {
+    const e = cp[idx];
+    if (!e || e.tag !== 1) return null;
+    return decodeModifiedUtf8(e.bytes);
+  }
+  function classNameAt(idx) {
+    const e = cp[idx];
+    if (!e || e.tag !== 7) return null;
+    return utf8At(e.nameIndex);
+  }
+  function natAt(idx) {
+    const e = cp[idx];
+    if (!e || e.tag !== 12) return null;
+    return { name: utf8At(e.nameIndex), desc: utf8At(e.descriptorIndex) };
+  }
+  function refAt(idx) {
+    const e = cp[idx];
+    if (!e || (e.tag !== 9 && e.tag !== 10 && e.tag !== 11)) return null;
+    const owner = classNameAt(e.classIndex);
+    const nat = natAt(e.nameAndTypeIndex);
+    if (!owner || !nat) return null;
+    return { owner, name: nat.name, desc: nat.desc };
+  }
+
+  // Collect all Utf8 entries — same shape as the old parser returns.
+  function utf8Strings(cpArr) {
+    const out = [];
+    for (const entry of cpArr) {
+      if (entry && entry.tag === 1) out.push(entry.bytes);
+    }
+    return out;
+  }
+  result.strings = utf8Strings(cp);
+
+  // Walk past access_flags, this_class, super_class, interfaces, fields,
+  // and into each method's Code attribute.
+  try {
+    off += 2 + 2 + 2;                                            // access, this, super
+    const ifaceCount = dv.getUint16(off); off += 2 + 2 * ifaceCount;
+    function skipAttributes() {
+      const ac = dv.getUint16(off); off += 2;
+      for (let a = 0; a < ac; a++) {
+        off += 2;
+        const len = dv.getUint32(off); off += 4 + len;
+      }
+    }
+    // fields
+    const fc = dv.getUint16(off); off += 2;
+    for (let f = 0; f < fc; f++) { off += 6; skipAttributes(); }
+    // methods
+    const mc = dv.getUint16(off); off += 2;
+    const seenInvokes = new Set();
+    const seenNews = new Set();
+    const seenClassConsts = new Set();
+
+    for (let m = 0; m < mc; m++) {
+      off += 6;
+      const ac = dv.getUint16(off); off += 2;
+      for (let a = 0; a < ac; a++) {
+        const nameIdx = dv.getUint16(off); off += 2;
+        const attrLen = dv.getUint32(off); off += 4;
+        const attrEnd = off + attrLen;
+        const attrName = utf8At(nameIdx) || '';
+        if (attrName !== 'Code') {
+          off = attrEnd;
+          continue;
+        }
+        // Code attribute layout: max_stack(2), max_locals(2), code_length(4), code[code_length], ...
+        off += 4;                                                // max_stack + max_locals
+        const codeLen = dv.getUint32(off); off += 4;
+        const codeEnd = off + codeLen;
+        let p = off;
+        while (p < codeEnd) {
+          const op = u8[p];
+          let advance = OP_LEN[op] || 1;
+          // Variable-length opcodes
+          if (op === 0xAA) {                                     // tableswitch
+            const pad = (4 - ((p - off + 1) & 3)) & 3;
+            const base = p + 1 + pad;
+            const low = dv.getInt32(base + 4);
+            const high = dv.getInt32(base + 8);
+            advance = 1 + pad + 12 + 4 * (high - low + 1);
+          } else if (op === 0xAB) {                              // lookupswitch
+            const pad = (4 - ((p - off + 1) & 3)) & 3;
+            const base = p + 1 + pad;
+            const npairs = dv.getInt32(base + 4);
+            advance = 1 + pad + 8 + 8 * npairs;
+          } else if (op === 0xC4) {                              // wide
+            const op2 = u8[p + 1];
+            advance = (op2 === 0x84) ? 6 : 4;                    // iinc wide vs load/store wide
+          } else if (op === 0xB6 || op === 0xB7 || op === 0xB8) {
+            const cpIdx = dv.getUint16(p + 1);
+            const ref = refAt(cpIdx);
+            if (ref) {
+              const k = (op === 0xB6 ? 'INVOKEVIRTUAL' : op === 0xB7 ? 'INVOKESPECIAL' : 'INVOKESTATIC') +
+                        '|' + ref.owner + '|' + ref.name + '|' + ref.desc;
+              if (!seenInvokes.has(k)) {
+                seenInvokes.add(k);
+                result.invokes.push({
+                  op: op === 0xB6 ? 'INVOKEVIRTUAL' : op === 0xB7 ? 'INVOKESPECIAL' : 'INVOKESTATIC',
+                  owner: ref.owner, name: ref.name, desc: ref.desc
+                });
+              }
+            }
+          } else if (op === 0xB9) {                              // invokeinterface
+            const cpIdx = dv.getUint16(p + 1);
+            const ref = refAt(cpIdx);
+            if (ref) {
+              const k = 'INVOKEINTERFACE|' + ref.owner + '|' + ref.name + '|' + ref.desc;
+              if (!seenInvokes.has(k)) {
+                seenInvokes.add(k);
+                result.invokes.push({ op: 'INVOKEINTERFACE', owner: ref.owner, name: ref.name, desc: ref.desc });
+              }
+            }
+          } else if (op === 0xBA) {                              // invokedynamic
+            const cpIdx = dv.getUint16(p + 1);
+            const e = cp[cpIdx];
+            if (e && e.tag === 18) {
+              const nat = natAt(e.nameAndTypeIndex);
+              if (nat) {
+                const k = 'INVOKEDYNAMIC||' + nat.name + '|' + nat.desc;
+                if (!seenInvokes.has(k)) {
+                  seenInvokes.add(k);
+                  result.invokes.push({ op: 'INVOKEDYNAMIC', owner: '', name: nat.name, desc: nat.desc });
+                }
+              }
+            }
+          } else if (op === 0xBB) {                              // new
+            const cpIdx = dv.getUint16(p + 1);
+            const owner = classNameAt(cpIdx);
+            if (owner && !seenNews.has(owner)) {
+              seenNews.add(owner);
+              result.newInstances.push({ owner });
+            }
+          } else if (op === 0x12 || op === 0x13) {               // ldc / ldc_w
+            const cpIdx = (op === 0x12) ? u8[p + 1] : dv.getUint16(p + 1);
+            const e = cp[cpIdx];
+            if (e && e.tag === 7) {                              // Class constant
+              const owner = utf8At(e.nameIndex);
+              if (owner && !seenClassConsts.has(owner)) {
+                seenClassConsts.add(owner);
+                result.classConsts.push({ owner });
+              }
+            }
+          }
+          if (!advance || advance < 1) advance = 1;              // safety guard
+          p += advance;
+        }
+        off = codeEnd;
+        // Skip exception_table + Code's nested attributes
+        const ec = dv.getUint16(off); off += 2 + 8 * ec;
+        const nestedAc = dv.getUint16(off); off += 2;
+        for (let na = 0; na < nestedAc; na++) {
+          off += 2;
+          const nlen = dv.getUint32(off); off += 4 + nlen;
+        }
+      }
+    }
+  } catch (e) {
+    result.partial = true;
+    result.partialReason = 'parse error during methods: ' + (e && e.message ? e.message : String(e));
+    return result;
+  }
+  return result;
+}
+
+// Each rule is matched against (owner, name) of a resolved invoke triple,
+// a `new X` instantiation, or an LDC of a Class constant. `forms` says
+// which to consider. `nameMatch` lets a rule match many method names
+// without listing each separately.
+//
+// We score these through the same apiHits/classHits map the string scanner
+// uses, so the existing cluster scoring picks them up. The bytecodeOnly
+// flag on each hit marks evidence that wasn't visible to the string-only
+// pass — surfaced in the new "method calls" UI section.
+const BYTECODE_RULES = [
+  // Process spawning — only triggered when an actual exec call is reached,
+  // not just because the strings "Runtime" or "exec" exist somewhere.
+  { cat: 'process', owners: ['java/lang/Runtime'], names: ['exec'], forms: ['invoke'],
+    label: 'Runtime.exec(...) call' },
+  { cat: 'process', owners: ['java/lang/ProcessBuilder'], names: ['start', '<init>'], forms: ['invoke', 'new'],
+    label: 'ProcessBuilder use' },
+
+  // Outbound network — Socket constructor, HttpClient.send, URL.openConnection, etc.
+  { cat: 'network', owners: ['java/net/Socket', 'javax/net/ssl/SSLSocket'], forms: ['new', 'invoke'],
+    names: ['<init>', 'connect'], label: 'raw socket connection' },
+  { cat: 'network', owners: ['java/net/URL'], names: ['openConnection', 'openStream'], forms: ['invoke'],
+    label: 'URL.openConnection / openStream' },
+  { cat: 'network', owners: ['java/net/http/HttpClient'], names: ['send', 'sendAsync'], forms: ['invoke'],
+    label: 'HttpClient.send' },
+  { cat: 'network', owners: ['java/net/HttpURLConnection'], forms: ['invoke', 'new'],
+    label: 'HttpURLConnection usage' },
+
+  // Dynamic class loading — defineClass / forName / loadClass.
+  { cat: 'dynload', owners: ['java/lang/ClassLoader', 'java/security/SecureClassLoader'],
+    names: ['defineClass'], forms: ['invoke'], label: 'ClassLoader.defineClass' },
+  { cat: 'dynload', owners: ['java/net/URLClassLoader'], forms: ['new', 'invoke', 'classconst'],
+    label: 'URLClassLoader instantiation/use' },
+  { cat: 'dynload', owners: ['java/lang/Class'], names: ['forName'], forms: ['invoke'],
+    label: 'Class.forName(...) lookup' },
+
+  // Embedded jar/resource loading
+  { cat: 'jarload', owners: ['java/util/jar/JarInputStream', 'java/util/jar/JarFile'],
+    forms: ['new', 'invoke'], label: 'JarInputStream/JarFile read' },
+
+  // Reflection — getMethod, getDeclaredMethod, setAccessible, Method.invoke
+  { cat: 'reflection', owners: ['java/lang/Class'],
+    names: ['getMethod', 'getDeclaredMethod', 'getField', 'getDeclaredField', 'getMethods', 'getDeclaredMethods'],
+    forms: ['invoke'], label: 'Class reflection lookup' },
+  { cat: 'reflection', owners: ['java/lang/reflect/Method', 'java/lang/reflect/Field', 'java/lang/reflect/Constructor'],
+    names: ['invoke', 'setAccessible'], forms: ['invoke'], label: 'reflective invoke/setAccessible' },
+  { cat: 'reflection', owners: ['sun/misc/Unsafe', 'jdk/internal/misc/Unsafe'],
+    forms: ['invoke', 'classconst'], label: 'sun.misc.Unsafe access' },
+
+  // Encoding / decoding helpers used in unpackers
+  { cat: 'encoding', owners: ['java/util/Base64$Decoder', 'java/util/Base64$Encoder', 'java/util/Base64'],
+    names: ['decode', 'encode', 'getDecoder', 'getEncoder'], forms: ['invoke'],
+    label: 'Base64 codec' },
+  { cat: 'encoding', owners: ['java/util/zip/GZIPInputStream', 'java/util/zip/Inflater',
+                              'java/util/zip/InflaterInputStream', 'java/util/zip/ZipInputStream'],
+    forms: ['new', 'invoke'], label: 'compression decoder' },
+
+  // StackWalker — caller-keyed string decryption shape
+  { cat: 'stackwalk', owners: ['java/lang/StackWalker'], names: ['getInstance', 'getCallerClass', 'walk'],
+    forms: ['invoke'], label: 'StackWalker / caller lookup' },
+
+  // Native loading
+  { cat: 'native', owners: ['java/lang/System', 'java/lang/Runtime'],
+    names: ['load', 'loadLibrary'], forms: ['invoke'], label: 'native library load' },
+
+  // Crypto
+  { cat: 'crypto', owners: ['javax/crypto/Cipher', 'java/security/Signature', 'java/security/MessageDigest'],
+    names: ['getInstance', 'doFinal', 'update', 'init', 'initSign', 'initVerify'], forms: ['invoke'],
+    label: 'cryptographic operation' },
+];
+
+function ruleMatchesCall(rule, owner, name, form) {
+  if (!rule.forms.includes(form)) return false;
+  if (rule.owners && !rule.owners.includes(owner)) return false;
+  if (rule.names && name !== undefined && !rule.names.includes(name)) return false;
+  return true;
+}
+
+async function sha256Hex(buf) {
+  const h = await crypto.subtle.digest('SHA-256', buf);
+  return [...new Uint8Array(h)].map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
+// ─── Score → band mapping ─────────────────────────────────────────────────
+
+function bandFor(score) {
+  if (score >= 70) return { color: 'red',    label: 'High risk',        word: 'likely malware',          desc: 'Multiple strong indicators of malicious behavior. Do not run this mod.' };
+  if (score >= 40) return { color: 'orange', label: 'Suspicious',       word: 'potentially malicious',   desc: 'Patterns commonly seen in malware are present. Manual review strongly recommended.' };
+  if (score >= 15) return { color: 'yellow', label: 'Minor concerns',   word: 'inspect manually',        desc: 'Some indicators worth a closer look. Could be a legitimate mod with unusual patterns.' };
+  return                  { color: 'green',  label: 'Likely clean',     word: 'no major red flags',      desc: 'No obvious malware patterns detected. Always still verify the source.' };
+}
+
+const SEV_COLORS = { red: 'var(--red)', orange: 'var(--orange)', yellow: 'var(--yellow)', green: 'var(--green)' };
+
+const CATEGORY_ORDER = ['session', 'network', 'local_web', 'process', 'dynload', 'jarload', 'fs_creds', 'webhook', 'reflection', 'encoding', 'crypto', 'stackwalk', 'native', 'systeminfo', 'persist'];
+
+const CATEGORY_INFO = {
+  session: { label: 'Minecraft session-token references', severity: 'yellow', note: 'GameProfile/Authlib profile usage is ignored. Only session-token shaped strings affect scoring, and only with stronger exfiltration evidence.' },
+  network: { label: 'Outbound network APIs', severity: 'yellow', note: 'HTTP clients, sockets, URLConnection, or SSL references. Many legitimate mods use these for updates, APIs, telemetry, or online services.' },
+  local_web: { label: 'Local web UI / browser bridge', severity: 'green', note: 'Local HttpServer, URLDecoder/URLEncoder, Desktop.browse, or localhost GUI bridge helpers. These are not treated as outbound networking by themselves.' },
+  process: { label: 'Process spawning APIs', severity: 'orange', note: 'Runtime or ProcessBuilder references. Browser-link launchers are ignored; risk increases when the same class also performs real outbound network, loader, persistence, or exfiltration behavior.' },
+  dynload: { label: 'Dynamic class loading', severity: 'orange', note: 'defineClass or URLClassLoader references. Stronger only when combined with real network retrieval or payload context.' },
+  fs_creds: { label: 'Launcher/browser storage paths', severity: 'yellow', note: 'Browser profile stores, Discord storage, Steam login data, cookies, or launcher account tokens. These are caution notes by themselves and become stronger only with outbound exfiltration.' },
+  webhook: { label: 'Webhook / paste endpoints', severity: 'orange', note: 'Webhook and paste endpoints are often used for simple exfiltration or staged payload retrieval.' },
+  reflection: { label: 'Reflection / unsafe access', severity: 'orange', note: 'Reflection and MethodHandles are common in event buses, mixins, and UI libraries. Stronger only when paired with payload-like constants, loaders, credential paths, or outbound network behavior.' },
+  encoding: { label: 'Encoded/compressed payload helpers', severity: 'yellow', note: 'Base64, gzip, or inflater helpers are common in resource unpackers. Suspicious only when clustered with payload-like constants, loaders, exfiltration, or outbound network behavior.' },
+  crypto: { label: 'Cryptography APIs', severity: 'yellow', note: 'Crypto can be normal, but it is useful supporting evidence when combined with obfuscation or network loaders.' },
+  stackwalk: { label: 'StackWalker caller lookup', severity: 'orange', note: 'Often used by string decryptors to vary keys by caller class. Also possible in advanced legitimate code.' },
+  jarload: { label: 'Embedded JAR/resource loader', severity: 'orange', note: 'JarInputStream/JarEntry usage can be legitimate, but is suspicious when paired with reflection, encrypted constants, or class loading.' },
+  native: { label: 'Native library loading', severity: 'orange', note: 'Native loading is uncommon for many mods and becomes risky when paired with network download or persistence behavior.' },
+  systeminfo: { label: 'System fingerprint strings', severity: 'yellow', note: 'System/user environment strings can be part of telemetry or RAT fingerprinting; stronger when clustered with network/exfil code.' },
+  persist: { label: 'Persistence-adjacent strings', severity: 'yellow', note: 'Startup paths or Java executable names. Treated as minor unless stronger malware indicators are present.' }
+};
+
+const URL_BUCKETS = [
+  { key: 'doh', label: 'DNS-over-HTTPS', severity: 'orange', hints: DOH_HINTS },
+  { key: 'chain', label: 'Blockchain/RPC', severity: 'red', hints: BLOCKCHAIN_HINTS },
+  { key: 'github', label: 'GitHub', severity: 'green', hints: ['github.com', 'raw.githubusercontent.com', 'api.github.com'] },
+  { key: 'modrinth', label: 'Modrinth', severity: 'green', hints: ['modrinth.com', 'api.modrinth.com'] },
+  { key: 'curseforge', label: 'CurseForge', severity: 'green', hints: ['curseforge.com', 'api.curseforge.com'] },
+  { key: 'cdn', label: 'CDN', severity: 'yellow', hints: ['cloudfront.net', 'cdn.discordapp.com', 'discord.com/api/webhooks'] }
+];
+
+function categoryInfo(cat) {
+  return CATEGORY_INFO[cat] || { label: cat, severity: 'yellow', note: 'Scanner pattern matched this category.' };
+}
+
+function setToArray(s) {
+  if (!s) return [];
+  if (Array.isArray(s)) return s;
+  if (s instanceof Set) return [...s];
+  return [];
+}
+
+function classToJavaName(cn) {
+  return String(cn || '')
+    .replace(/\.class$/, '')
+    .replace(/\//g, '.');
+}
+
+function compactClassName(cn) {
+  const dotted = classToJavaName(cn);
+  if (dotted.length <= 86) return dotted;
+  const parts = dotted.split('.');
+  if (parts.length <= 2) return dotted.slice(0, 83) + '…';
+  return parts.slice(0, 2).join('.') + '.….' + parts.slice(-2).join('.');
+}
+
+function urlBucket(url) {
+  const lower = String(url || '').toLowerCase();
+  for (const b of URL_BUCKETS) {
+    if (b.hints.some(h => lower.includes(h))) return b;
+  }
+  return { key: 'url', label: 'URL', severity: 'yellow', hints: [] };
+}
+
+function summarizeEndpointBuckets(urls) {
+  const buckets = new Map();
+  for (const u of urls || []) {
+    const b = urlBucket(u);
+    buckets.set(b.key, { ...b, count: (buckets.get(b.key)?.count || 0) + 1 });
+  }
+  return [...buckets.values()].sort((a, b) => b.count - a.count || a.label.localeCompare(b.label));
+}
+
+function hasAnyFlag(r, titlePart) {
+  const needle = String(titlePart).toLowerCase();
+  return (r.flags || []).some(f => String(f.title || '').toLowerCase().includes(needle));
+}
+
+function buildScannerNotes(r) {
+  const endpointBuckets = summarizeEndpointBuckets(r.urls);
+  const endpointText = endpointBuckets.length
+    ? endpointBuckets.map(b => `${b.label}: ${b.count}`).join(' · ')
+    : 'No plaintext URLs found.';
+
+  const sessionNote = hasAnyFlag(r, 'session token')
+    ? 'Session/auth references were paired with stronger exfiltration evidence.'
+    : 'Session/auth references alone were treated as normal mod/client behavior.';
+
+  const credNote = r.apiHits && r.apiHits.fs_creds
+    ? 'Browser, Discord, Steam, or launcher storage strings were found. This is a caution note unless paired with outbound exfiltration.'
+    : 'No browser credential or launcher account-token paths were detected.';
+
+  const localWebNote = r.apiHits && r.apiHits.local_web
+    ? `Local HttpServer/Desktop/browser-bridge helpers appeared in ${r.apiHits.local_web.size} class(es). They are not scored as outbound networking unless real HTTP/socket client behavior is also present.`
+    : 'No local web UI/browser bridge APIs were found.';
+
+  const parseNote = r.partialClassCount
+    ? `${r.partialClassCount} class file(s) tripped the parser before the full constant pool was read. The "partial parses" section above lists each one. Strings inside the unread region were not analyzed; a deliberately malformed class can use this to hide constants from naive scanners.`
+    : 'All class files parsed cleanly through the end of the constant pool.';
+
+  const vtNote = 'VirusTotal link searches the SHA-256 only; this page never uploads the JAR.';
+  const profileNote = r.wurstProfile
+    ? 'Wurst profile detected for context only. No broad Wurst allowlist is applied; generic JVM metadata, human-readable text, and translator clients are filtered globally.'
+    : 'No broad client allowlist was applied. Generic JVM metadata, human-readable text, and translator clients are filtered globally.';
+
+  return [
+    { k: 'profile handling', v: profileNote },
+    { k: 'translator handling', v: 'Google Translate client code is treated as benign network/encoding behavior unless it is paired with hard malware evidence such as credential paths, webhooks, dynamic loaders, native loading, persistence, or a known family signature.' },
+    { k: 'local web UI handling', v: localWebNote },
+    { k: 'family signature', v: (r.familyMatches && r.familyMatches.length) ? r.familyMatches.map(f => f.title).join(' · ') : 'No known family signature matched.' },
+    { k: 'session handling', v: sessionNote },
+    { k: 'account auth flows', v: 'Microsoft/Xbox/Mojang/TheAltening login/profile classes are treated as account-management code unless the same class also contains webhook, credential-store, loader, native, persistence, or payload-hiding evidence.' },
+    { k: 'browser link commands', v: 'Commands that only launch a known external URL such as Discord/GitHub/wiki/project pages with cmd/open/xdg-open are treated as browser launchers, not droppers.' },
+    { k: 'credential paths', v: credNote },
+    { k: 'endpoints', v: endpointText },
+    { k: 'parse coverage', v: parseNote },
+    { k: 'bytecode walk', v: (r.bytecodeFindings && r.bytecodeFindings.length)
+        ? (() => {
+            const active = r.bytecodeFindings.filter(h => !h.suppressed).length;
+            const suppressed = r.bytecodeFindings.length - active;
+            return `Bytecode walker resolved ${r.bytecodeFindings.length} suspicious method call(s) / instantiations / class constants. ${active} count toward scoring; ${suppressed} were filtered as benign context shapes (child-JVM helper, local web-UI bridge, Desktop.open launcher, browser launcher, soft-dependency check, Minecraft/Fabric compat reflection, LAN/proxy socket, NBT/skin Base64, plugin/registry reflection). All ${r.bytecodeFindings.length} are listed in the "method calls" section — suppressed entries are dimmed and tagged with their context reason.`;
+          })()
+        : 'Bytecode walker ran on every class file but found no calls matching the suspicious-API rule set. (Java source files are not bytecode-scanned.)' },
+    { k: 'obfuscation engine', v: `${r.obfuscatedCount || 0} renamed-looking class(es), ${r.highEntropyClassCount || 0} class(es) with payload-like high-entropy constants (${r.scoredHighEntropyClassCount || 0} counted after global benign-constant filtering), ${r.encodedClassCount || 0} class(es) with encoded payload-shaped constants.` },
+    { k: 'virustotal', v: vtNote },
+    { k: 'score basis', v: `${r.flags.length} indicator${r.flags.length === 1 ? '' : 's'} and ${(r.classRisk || []).length} behavior cluster${(r.classRisk || []).length === 1 ? '' : 's'} contributed to a ${r.score}/100 score.` },
+    { k: 'manual review', v: 'A clean result is not a guarantee. Decompiled code and source reputation still matter.' }
+  ];
+}
+
+function renderBytecodeFindings(r) {
+  const sectionEl = document.getElementById('sec-bytecode');
+  const countEl = document.getElementById('bytecode-count');
+  const contentEl = document.getElementById('bytecode-content');
+  if (!sectionEl || !countEl || !contentEl) return;
+  const findings = r.bytecodeFindings || [];
+  if (!findings.length) {
+    sectionEl.style.display = 'none';
+    return;
+  }
+
+  // Group by class, then dedupe within the class so multiple identical
+  // (op, owner, name) triples don't show as multiple lines.
+  const byClass = new Map();
+  for (const h of findings) {
+    if (!byClass.has(h.cn)) byClass.set(h.cn, new Map());
+    const key = h.form + '|' + h.owner + '|' + h.name;
+    byClass.get(h.cn).set(key, h);
+  }
+
+  // Rank classes by danger weight so the most interesting ones come first.
+  const dangerWeight = { process: 4, dynload: 4, jarload: 3, native: 3, network: 2, stackwalk: 2, reflection: 1, encoding: 1, crypto: 1 };
+  const SHOW_LIMIT = 60;
+  const classEntries = [...byClass.entries()]
+    .map(([cn, hits]) => {
+      const hitArr = [...hits.values()];
+      const weight = hitArr.reduce((s, h) => s + (dangerWeight[h.cat] || 0), 0);
+      return { cn, hits: hitArr, weight };
+    })
+    .sort((a, b) => b.weight - a.weight || a.cn.localeCompare(b.cn));
+  const shown = classEntries.slice(0, SHOW_LIMIT);
+  const hiddenCount = classEntries.length - shown.length;
+  countEl.textContent = hiddenCount > 0
+    ? `${shown.length} of ${classEntries.length} class(es) shown · ${findings.length} hit(s)`
+    : `${classEntries.length} class(es) · ${findings.length} hit(s)`;
+  sectionEl.style.display = '';
+
+  const HIT_LIMIT = 10;
+  contentEl.innerHTML = `<div class="risk-grid">${shown.map(({ cn, hits }) => {
+    const sortedHits = hits.sort((a, b) => (dangerWeight[b.cat] || 0) - (dangerWeight[a.cat] || 0));
+    const activeHits = sortedHits.filter(h => !h.suppressed);
+    const tier = (activeHits.some(h => ['process', 'dynload', 'jarload', 'native'].includes(h.cat))) ? 'high'
+      : (activeHits.some(h => ['network', 'stackwalk', 'reflection'].includes(h.cat))) ? 'medium' : 'low';
+    const suppressedReasons = [...new Set(sortedHits.filter(h => h.suppressed).map(h => h.suppressionReason))];
+    const suppressedBadge = suppressedReasons.length
+      ? `<div style="margin:4px 0 8px;font-size:10px;color:var(--green);letter-spacing:0.1em;text-transform:uppercase">context: ${escapeHtml(suppressedReasons.join(' · '))} — not scored</div>`
+      : '';
+    const lines = sortedHits.slice(0, HIT_LIMIT).map(h => {
+      const formLabel = h.form === 'new' ? 'new' : h.form === 'classconst' ? 'Class' : h.op || 'invoke';
+      const sig = h.owner + (h.name ? '#' + h.name : '') + (h.desc ? h.desc : '');
+      const opacity = h.suppressed ? 'opacity:0.55' : '';
+      return `<div style="display:flex;gap:8px;align-items:center;margin:3px 0;${opacity}">
+        <span class="micro-pill ${categoryInfo(h.cat).severity}">${escapeHtml(h.cat)}</span>
+        <code style="color:var(--text);font-size:10.5px;word-break:break-all">${escapeHtml(formLabel)} ${escapeHtml(sig)}</code>
+      </div>`;
+    }).join('');
+    const more = sortedHits.length > HIT_LIMIT ? `<div class="more" style="color:var(--text-dimmer);font-size:10px;margin-top:6px">+${sortedHits.length - HIT_LIMIT} more call(s) in this class</div>` : '';
+    return `<div class="risk-card ${tier}">
+      <div class="risk-top">
+        <div class="risk-class">${escapeHtml(compactClassName(cn))}</div>
+        <div class="risk-score">${sortedHits.length}</div>
+      </div>
+      ${suppressedBadge}${lines}${more}
+    </div>`;
+  }).join('')}</div>${hiddenCount > 0 ? `<div style="margin-top:12px;color:var(--text-dimmer);font-size:11px;letter-spacing:0.04em">+${hiddenCount} more class(es) with bytecode findings not displayed (cap is ${SHOW_LIMIT}). The full list is available via the raw scan result if you want to scroll the DOM.</div>` : ''}`;
+}
+
+function renderPartialParses(r) {
+  const sectionEl = document.getElementById('sec-partial-parses');
+  const countEl = document.getElementById('partial-count');
+  const contentEl = document.getElementById('partial-content');
+  if (!sectionEl || !countEl || !contentEl) return;
+
+  const total = r.partialClassCount || 0;
+  const examples = r.partialClassExamples || [];
+
+  if (total <= 0) {
+    sectionEl.style.display = 'none';
+    return;
+  }
+
+  sectionEl.style.display = '';
+  const remaining = Math.max(0, total - examples.length);
+  countEl.textContent = remaining > 0
+    ? `${examples.length} of ${total} shown`
+    : `${total}`;
+
+  const cards = examples.map(p => `
+    <div class="evidence-card">
+      <div class="top">
+        <div class="name">${escapeHtml(compactClassName(p.cn))}</div>
+        <div class="micro-pill yellow">partial</div>
+      </div>
+      <div class="why">${escapeHtml(p.reason || 'parser bailed before reading full constant pool')}</div>
+    </div>`).join('');
+
+  const overflowNote = remaining > 0
+    ? `<div style="margin-top:12px;color:var(--text-dimmer);font-size:11px;letter-spacing:0.04em">+${remaining} more partial-parse case(s) not stored (cap is ${examples.length}). Scattering many bogus tags across class files is a known evasion against naive scanners — every additional case beyond the cap should be treated as a stronger evasion signal, not a parser limitation.</div>`
+    : '';
+
+  contentEl.innerHTML = `<div class="evidence-grid">${cards}</div>${overflowNote}`;
+}
+
+function renderDetectedPatterns(r) {
+  const countEl = document.getElementById('api-count');
+  const contentEl = document.getElementById('api-content');
+  if (!countEl || !contentEl) return;
+
+  const cats = CATEGORY_ORDER.filter(cat => r.apiHits && r.apiHits[cat]);
+  const extraCats = Object.keys(r.apiHits || {}).filter(cat => !CATEGORY_ORDER.includes(cat));
+  const allCats = cats.concat(extraCats);
+  countEl.textContent = allCats.length;
+
+  if (!allCats.length) {
+    contentEl.innerHTML = `<div class="pre empty">no suspicious API categories matched</div>`;
+    return;
+  }
+
+  contentEl.innerHTML = `<div class="evidence-grid">${allCats.map(cat => {
+    const info = categoryInfo(cat);
+    const classes = setToArray(r.apiHits[cat]);
+    const sample = classes.slice(0, 5).map(c => `<code>${escapeHtml(compactClassName(c))}</code>`).join('');
+    const more = classes.length > 5 ? `<div class="more">+${classes.length - 5} more class(es)</div>` : '';
+    return `
+      <div class="evidence-card">
+        <div class="top">
+          <div class="name">${escapeHtml(info.label)}</div>
+          <div class="micro-pill ${info.severity}">${classes.length}</div>
+        </div>
+        <div class="why">${escapeHtml(info.note)}</div>
+        <div class="class-sample">${sample}${more}</div>
+      </div>`;
+  }).join('')}</div>`;
+}
+
+function renderClassRisk(r) {
+  const countEl = document.getElementById('risk-count');
+  const contentEl = document.getElementById('risk-content');
+  if (!countEl || !contentEl) return;
+  const risks = r.classRisk || [];
+  countEl.textContent = risks.length;
+  if (!risks.length) {
+    contentEl.innerHTML = `<div class="pre empty">no concentrated behavior clusters scored above the review threshold</div>`;
+    return;
+  }
+  contentEl.innerHTML = `<div class="risk-grid">${risks.map(risk => `
+    <div class="risk-card ${risk.tier}">
+      <div class="risk-top">
+        <div class="risk-class">${escapeHtml(compactClassName(risk.className))}</div>
+        <div class="risk-score">${risk.score}/100</div>
+      </div>
+      <div class="reason-list">${(risk.reasons.length ? risk.reasons : ['supporting suspicious evidence']).map(reason => `<span>${escapeHtml(reason)}</span>`).join('')}</div>
+    </div>`).join('')}</div>`;
+}
+
+function renderScannerNotes(r) {
+  const el = document.getElementById('triage-content');
+  if (!el) return;
+  const notes = buildScannerNotes(r);
+  el.innerHTML = `<div class="note-grid">${notes.map(n => `
+    <div class="note-card">
+      <div class="k">${escapeHtml(n.k)}</div>
+      <div class="v">${escapeHtml(n.v)}</div>
+    </div>`).join('')}</div>`;
+}
+
+function renderEndpointChips(r) {
+  const urls = r.urls || [];
+  if (!urls.length) return '';
+  const buckets = summarizeEndpointBuckets(urls);
+  if (!buckets.length) return '';
+  return `<div class="endpoint-list">${buckets.map(b => `
+    <span class="endpoint-chip ${b.severity}">${escapeHtml(b.label)} · ${b.count}</span>
+  `).join('')}</div>`;
+}
+
+
+const META_PARSE_LIMIT = 256 * 1024;
+const META_PREVIEW_LIMIT = 12000;
+const MANIFEST_PREVIEW_LIMIT = 5000;
+
+function compactMetadataText(name, txt) {
+  const raw = String(txt || '').trim();
+  const limit = name === 'META-INF/MANIFEST.MF' ? MANIFEST_PREVIEW_LIMIT : META_PREVIEW_LIMIT;
+  if (raw.length <= limit) return raw;
+
+  if (name === 'META-INF/MANIFEST.MF') {
+    const lines = raw.split(/\r?\n/);
+    const kept = [];
+    let skippedClientEntries = 0;
+    for (const line of lines) {
+      if (/^\s/.test(line) || line.startsWith('Fabric-Loom-Client-Only-Entries:')) {
+        if (kept.some(l => l.startsWith('Fabric-Loom-Client-Only-Entries:'))) {
+          skippedClientEntries++;
+          continue;
+        }
+      }
+      kept.push(line);
+      if (kept.join('\n').length > limit) break;
+    }
+    return kept.join('\n') + `\n… metadata preview truncated (${raw.length.toLocaleString()} chars total${skippedClientEntries ? `, ${skippedClientEntries} folded manifest line(s) hidden` : ''})`;
+  }
+
+  return raw.slice(0, limit) + `\n… metadata preview truncated (${raw.length.toLocaleString()} chars total)`;
+}
+
+async function readMetadataFile(zip, name) {
+  const txt = await zip.file(name).async('string');
+  return { raw: txt, preview: compactMetadataText(name, txt) };
+}
+
+function countPrefix(names, prefix) {
+  return (names || []).filter(n => String(n).startsWith(prefix)).length;
+}
+
+function entrypointValues(entrypoints) {
+  return getEntrypointRows(entrypoints).flatMap(r => r.vals || []);
+}
+
+function hasEntrypoint(entrypoints, value) {
+  return entrypointValues(entrypoints).some(v => v === value);
+}
+
+function manifestMainClass(metaText) {
+  const m = String(metaText || '').match(/(?:^|\n)Main-Class:\s*([^\r\n]+)/);
+  return m ? m[1].trim() : '';
+}
+
+function detectFamilyMatches(ctx) {
+  const names = ctx.names || [];
+  const j = ctx.fabricJson || {};
+  const entries = entrypointValues(j.entrypoints);
+  const mainClass = manifestMainClass(ctx.metaText);
+  const pkgH2 = countPrefix(names, 'h2vmxh/zhm/');
+  const pkgIjka = countPrefix(names, 'ijka/lgzb1cq/');
+  const pkgPtx = countPrefix(names, 'ptx/hoa/');
+  const hasKryptonMetadata = /krypton/i.test(`${j.id || ''} ${j.name || ''} ${j.description || ''} ${JSON.stringify(j.authors || '')}`);
+  const hasWeedHackShape =
+    hasKryptonMetadata &&
+    isFabricExampleContact(j.contact) &&
+    hasEntrypoint(j.entrypoints, 'h2vmxh.zhm.SF') &&
+    (mainClass === 'h2vmxh.zhm.oYmEOD' || names.includes('h2vmxh/zhm/oYmEOD.class')) &&
+    names.includes('h2vmxh/zhm/SF.class') &&
+    pkgH2 >= 5 && pkgIjka >= 50 && pkgPtx >= 3;
+
+  const hasBehavioralWeedHackShape =
+    entries.some(v => /^h2vmxh\.zhm\./.test(v)) &&
+    pkgH2 >= 5 && pkgIjka >= 50 && pkgPtx >= 3 &&
+    (ctx.classRisk || []).some(r => r.score >= 70 && /h2vmxh\/zhm\//.test(r.className));
+
+  const out = [];
+  if (ctx.hash === '47079a34c45a94a173797c35c2336ff4732981871b48c29a8c0253d3dd1930ec' || hasWeedHackShape || hasBehavioralWeedHackShape) {
+    const evidence = [];
+    if (hasKryptonMetadata) evidence.push('Krypton/Krypton+ metadata');
+    if (isFabricExampleContact(j.contact)) evidence.push('Fabric example contact spoof');
+    if (hasEntrypoint(j.entrypoints, 'h2vmxh.zhm.SF')) evidence.push('h2vmxh.zhm.SF entrypoint');
+    if (mainClass === 'h2vmxh.zhm.oYmEOD' || names.includes('h2vmxh/zhm/oYmEOD.class')) evidence.push('h2vmxh.zhm.oYmEOD launcher class');
+    if (pkgIjka >= 50 || pkgPtx >= 3) evidence.push(`obfuscated package layout h2vmxh/ijka/ptx (${pkgH2}/${pkgIjka}/${pkgPtx})`);
+    if ((ctx.classRisk || []).some(r => r.score >= 70)) evidence.push('high-risk encrypted loader behavior');
+    out.push({
+      key: 'weedhack-krypton',
+      title: 'WeedHack/Krypton RAT family signature',
+      desc: `Matches the WeedHack-created Krypton RAT family shape${evidence.length ? `: ${evidence.join('; ')}.` : '.'}`
+    });
+  }
+  return out;
+}
+
+// ─── Java source scanning ─────────────────────────────────────────────────
+
+// Java's compiler decodes \uXXXX escapes BEFORE tokenization, anywhere in the
+// source — even inside identifiers. So `Run\u0074ime` is literally `Runtime`
+// at compile time. We mirror that here and track how many were decoded as an
+// obfuscation signal: heavy \u use in identifiers/strings is a known trick
+// to hide suspicious APIs from naive grep scans.
+function preprocessJavaUnicodeEscapes(text) {
+  let count = 0;
+  const result = String(text).replace(/\\u+([0-9a-fA-F]{4})/g, (_, hex) => {
+    count++;
+    return String.fromCharCode(parseInt(hex, 16));
+  });
+  return { text: result, escapeCount: count };
+}
+
+// Decode the standard Java string-literal escape sequences. \u is already
+// handled at the file level above, so it never reaches us here.
+function decodeJavaStringLiteral(raw) {
+  let out = '';
+  let i = 0;
+  const n = raw.length;
+  while (i < n) {
+    const c = raw[i];
+    if (c !== '\\') { out += c; i++; continue; }
+    const nx = raw[i + 1];
+    if (nx === undefined) { out += '\\'; break; }
+    if (nx === 'n') { out += '\n'; i += 2; }
+    else if (nx === 't') { out += '\t'; i += 2; }
+    else if (nx === 'r') { out += '\r'; i += 2; }
+    else if (nx === 'b') { out += '\b'; i += 2; }
+    else if (nx === 'f') { out += '\f'; i += 2; }
+    else if (nx === 's') { out += ' '; i += 2; }
+    else if (nx === '"') { out += '"'; i += 2; }
+    else if (nx === "'") { out += "'"; i += 2; }
+    else if (nx === '\\') { out += '\\'; i += 2; }
+    else if (nx === '\n') { i += 2; }                     // text-block line continuation
+    else if (nx >= '0' && nx <= '7') {                    // octal \NNN
+      let val = 0;
+      let j = i + 1;
+      const maxLen = (nx <= '3') ? 3 : 2;
+      const stop = Math.min(n, i + 1 + maxLen);
+      while (j < stop && raw[j] >= '0' && raw[j] <= '7') {
+        val = val * 8 + (raw.charCodeAt(j) - 48);
+        j++;
+      }
+      out += String.fromCharCode(val);
+      i = j;
+    } else {
+      out += nx; i += 2;
+    }
+  }
+  return out;
+}
+
+// Walks Java source, returning decoded string literals plus the set of
+// identifiers seen. Skips line comments, block comments, and character
+// literals so they don't pollute either bucket.
+function tokenizeJavaSource(text) {
+  const strings = [];
+  const identifiers = new Set();
+  const n = text.length;
+  let i = 0;
+  while (i < n) {
+    const c = text[i];
+    // Line comment
+    if (c === '/' && text[i + 1] === '/') {
+      while (i < n && text[i] !== '\n') i++;
+      continue;
+    }
+    // Block comment
+    if (c === '/' && text[i + 1] === '*') {
+      i += 2;
+      while (i < n && !(text[i] === '*' && text[i + 1] === '/')) i++;
+      i += 2;
+      continue;
+    }
+    // Text block """..."""
+    if (c === '"' && text[i + 1] === '"' && text[i + 2] === '"') {
+      i += 3;
+      if (text[i] === '\r') i++;
+      if (text[i] === '\n') i++;
+      const start = i;
+      while (i < n && !(text[i] === '"' && text[i + 1] === '"' && text[i + 2] === '"')) {
+        if (text[i] === '\\' && i + 1 < n) i++;
+        i++;
+      }
+      strings.push(decodeJavaStringLiteral(text.slice(start, i)));
+      i += 3;
+      continue;
+    }
+    // Regular string literal
+    if (c === '"') {
+      i++;
+      const start = i;
+      while (i < n && text[i] !== '"' && text[i] !== '\n') {
+        if (text[i] === '\\' && i + 1 < n) i++;
+        i++;
+      }
+      strings.push(decodeJavaStringLiteral(text.slice(start, i)));
+      if (text[i] === '"') i++;
+      continue;
+    }
+    // Character literal
+    if (c === "'") {
+      i++;
+      while (i < n && text[i] !== "'" && text[i] !== '\n') {
+        if (text[i] === '\\' && i + 1 < n) i++;
+        i++;
+      }
+      if (text[i] === "'") i++;
+      continue;
+    }
+    // Identifier
+    if (/[A-Za-z_$]/.test(c)) {
+      const start = i;
+      while (i < n && /[A-Za-z0-9_$]/.test(text[i])) i++;
+      identifiers.add(text.slice(start, i));
+      continue;
+    }
+    i++;
+  }
+  return { strings, identifiers };
+}
+
+function extractJavaPackage(text) {
+  const m = String(text).match(/^\s*package\s+([\w.]+)\s*;/m);
+  return m ? m[1] : '';
+}
+
+function extractJavaTopLevelType(text) {
+  const m = String(text).match(/(?:^|\n)\s*(?:public\s+|final\s+|abstract\s+|sealed\s+|non-sealed\s+|static\s+|strictfp\s+)*(?:class|interface|enum|record)\s+([A-Za-z_$][\w$]*)/);
+  return m ? m[1] : '';
+}
+
+function syntheticClassNameForJava(file, text) {
+  const pkg = extractJavaPackage(text);
+  const type = extractJavaTopLevelType(text);
+  const baseName = (file.name || 'source').replace(/\.java$/i, '');
+  const simple = type || baseName || 'source';
+  if (pkg) return pkg.replace(/\./g, '/') + '/' + simple;
+  return simple;
+}
+
+async function scanJavaSource(file, setProgress) {
+  const reportProgress = setProgress || (() => {});
+  reportProgress(0, 0, 'reading source');
+  const buf = await file.arrayBuffer();
+  const size = buf.byteLength;
+  reportProgress(0, 0, 'hashing');
+  const hash = await sha256Hex(buf);
+  reportProgress(0, 0, 'tokenising');
+  const rawText = new TextDecoder('utf-8', { fatal: false }).decode(buf);
+  const { text, escapeCount } = preprocessJavaUnicodeEscapes(rawText);
+  const { strings, identifiers } = tokenizeJavaSource(text);
+  await yieldToEventLoop();
+
+  const synthClass = syntheticClassNameForJava(file, text);
+  const packageName = extractJavaPackage(text);
+  const topType = extractJavaTopLevelType(text);
+
+  const classStats = {};
+  classStats[synthClass] = makeClassStats(synthClass);
+  const stats = classStats[synthClass];
+  const classHits = {};
+  classHits[synthClass] = new Set();
+  const apiHits = {};
+
+  function addApiHit(cn, cat) {
+    if (cat === 'session' && isBenignSessionClass(cn)) return;
+    if (!apiHits[cat]) apiHits[cat] = new Set();
+    apiHits[cat].add(cn);
+    if (!classHits[cn]) classHits[cn] = new Set();
+    classHits[cn].add(cat);
+  }
+
+  // 1. Match SUSPICIOUS_REFS against identifiers + the raw source text.
+  // For JVM-style patterns (`java/lang/Runtime`) we look for both the dotted
+  // form in text and the simple name in the identifier set, which handles
+  // both qualified (`java.lang.Runtime`) and unqualified (post-import) use.
+  // For free-text patterns (`Login Data`, `os.name`) the matchesSuspiciousRef
+  // path below handles them via the string-literal scan.
+  for (const [cat, pats] of Object.entries(SUSPICIOUS_REFS)) {
+    for (const p of pats) {
+      let hit = false;
+      if (p.includes('/')) {
+        const simple = p.split('/').pop();
+        // Use the same boundary-aware dotted-form check as the JAR scanner
+        // so we don't false-positive on overlapping names (e.g. matching
+        // `java.lang.Runtime` against `java.lang.RuntimeException`).
+        if (dottedFormMatchesString(text, p) || identifiers.has(simple)) hit = true;
+      } else if (/^[A-Za-z_$][\w$]*$/.test(p)) {
+        if (identifiers.has(p)) hit = true;
+      }
+      // The 'session' category also matches qualified access like
+      // `.getAccessToken()` even if it slipped past the identifier set.
+      if (!hit && cat === 'session' && (p === 'getAccessToken' || p === 'accessToken')) {
+        if (text.includes(p)) hit = true;
+      }
+      if (hit) {
+        addApiHit(synthClass, cat);
+        if (cat === 'network') stats.networkApiRefs++;
+        break;
+      }
+    }
+  }
+
+  // 2. Scan each decoded string literal for URLs, IPs, eth addresses,
+  // free-text suspicious patterns, and the encoding/entropy signals.
+  const urls = new Set();
+  const ips = new Set();
+  const eth = new Set();
+  let highEntropy = 0;
+  let encodedStrings = 0;
+
+  for (const ss of strings) {
+    stats.stringCount++;
+    stats.byteCount += ss.length;
+
+    if (hasGoogleTranslateString(ss)) stats.translationHints++;
+    if (hasMinecraftAccountAuthString(ss)) stats.authHints++;
+    if (hasBrowserLauncherCommandString(ss)) stats.browserLaunchHints++;
+
+    for (const [cat, pats] of Object.entries(SUSPICIOUS_REFS)) {
+      for (const p of pats) {
+        if (matchesSuspiciousRef(cat, ss, p)) {
+          addApiHit(synthClass, cat);
+          if (cat === 'network') stats.networkApiRefs++;
+          break;
+        }
+      }
+    }
+
+    for (const u of extractUrlsFromString(ss)) {
+      urls.add(u);
+      stats.urls++;
+      addApiHit(synthClass, 'network');
+      if (isLikelyBenignExternalLink(u)) stats.benignLinkUrls++;
+      else stats.suspiciousUrls++;
+      if (hasGoogleTranslateString(u)) stats.translationHints++;
+      if (hasMinecraftAccountAuthString(u)) stats.authHints++;
+      if (u.includes('discord.com/api/webhooks') || u.includes('discordapp.com/api/webhooks')) {
+        addApiHit(synthClass, 'webhook');
+      }
+    }
+    for (const m of String(ss).matchAll(ETH_RE)) {
+      eth.add(m[0]);
+      stats.eth++;
+    }
+    for (const m of String(ss).matchAll(IP_RE)) {
+      const ip = m[0];
+      const parts = ip.split('.').map(Number);
+      if (parts.every(p => p >= 0 && p <= 255) &&
+          !ip.startsWith('0.') && !ip.startsWith('127.') && !ip.startsWith('255.')) {
+        ips.add(ip);
+        stats.ips++;
+      }
+    }
+
+    if (looksEncodedAscii(ss)) {
+      encodedStrings++;
+      stats.encoded++;
+    }
+    // Source has no raw byte buffer per string, so we approximate the
+    // "rawBytes" check by feeding back the decoded string's char codes.
+    // looksSuspiciousHighEntropyString defaults to the encoded-ascii check
+    // for printable input, which is what we want here.
+    const fauxBytes = new Uint8Array(ss.length);
+    for (let k = 0; k < ss.length; k++) fauxBytes[k] = ss.charCodeAt(k) & 0xFF;
+    if (looksSuspiciousHighEntropyString(fauxBytes, ss)) {
+      highEntropy++;
+      stats.highEntropy++;
+    }
+  }
+
+  // 3. Body-level obfuscation signal: source-only, since the class file's
+  // nameScore wouldn't catch it. Single-letter or l/I/1/0-confusable
+  // identifier names + heavy \u escapes are the classic Java-source
+  // obfuscation tells.
+  const identList = [...identifiers];
+  const shortIdents = identList.filter(n =>
+    n.length === 1 || /^[lI1O0]{2,}$/.test(n) || /^[a-z]{1,2}\d+$/.test(n)
+  ).length;
+  const obfRatio = identList.length ? shortIdents / identList.length : 0;
+  if (obfRatio > 0.3 || escapeCount >= 8) {
+    stats.nameScore = Math.max(stats.nameScore, 75);
+  } else if (obfRatio > 0.15 || escapeCount >= 3) {
+    stats.nameScore = Math.max(stats.nameScore, 55);
+  }
+
+  const totalStrings = strings.length;
+  const highEntropyClassCount = stats.highEntropy > 0 ? 1 : 0;
+  const encodedClassCount = stats.encoded > 0 ? 1 : 0;
+  const obfuscatedCount = stats.nameScore >= 45 ? 1 : 0;
+  const strongObfuscatedCount = stats.nameScore >= 70 ? 1 : 0;
+  const obfPct = obfuscatedCount * 100;
+  const strongObfPct = strongObfuscatedCount * 100;
+  const pkgCount = [];
+  const root = synthClass.split('/')[0];
+  if (root) pkgCount.push([root, 1]);
+
+  const wurstProfile = false;
+  const classRisk = summarizeClassRisks(classStats, classHits, { isWurstProfile: false });
+  const classFiles = [synthClass + '.java'];
+  const familyMatches = detectFamilyMatches({
+    hash, names: classFiles, classFiles,
+    fabricJson: null, metaText: '', classRisk, apiHits, classHits, classStats
+  });
+
+  // ─── Score it (mirrors the JAR scoring path, scaled to one class) ────
+  let score = 0;
+  const flags = [];
+  const knownBad = KNOWN_BAD[hash];
+
+  function flag(sev, title, desc, points) {
+    flags.push({ sev, title, desc });
+    score += points;
+  }
+
+  function classesWithAll(...cats) {
+    return cats.every(cat => classHits[synthClass].has(cat)) ? [synthClass] : [];
+  }
+
+  const networkDynloadClasses = classesWithAll('network', 'dynload').filter(cn => {
+    const st = classStats[cn] || {};
+    const hits = classHits[cn] || new Set();
+    const realOutbound = (st.networkApiRefs > 0) || (st.suspiciousUrls > 0) || (st.ips > 0) || hits.has('webhook');
+    return realOutbound && !shouldSuppressKnownBenignClassSignal(cn, st, hits, { isWurstProfile: false });
+  });
+  const networkProcessClasses = classesWithAll('network', 'process');
+  const sessionNetworkClasses = classesWithAll('session', 'network');
+  const credentialNetworkClasses = classesWithAll('fs_creds', 'network');
+  const webhookNetworkClasses = classesWithAll('webhook', 'network');
+  const nativeNetworkClasses = classesWithAll('native', 'network');
+  const sessionExfilClasses = sessionNetworkClasses.filter(cn =>
+    hasHardSessionExfilClassSignal(cn, classStats[cn], classHits[cn] || new Set()) || knownBad
+  );
+
+  const hasDoH = [...urls].some(u => DOH_HINTS.some(h => u.toLowerCase().includes(h)));
+  const hasBlockchainEndpoint = [...urls].some(u => BLOCKCHAIN_HINTS.some(h => u.toLowerCase().includes(h)));
+
+  const hasHardEncryptionContext =
+    knownBad ||
+    familyMatches.length > 0 ||
+    credentialNetworkClasses.length > 0 ||
+    webhookNetworkClasses.length > 0 ||
+    networkDynloadClasses.length > 0 ||
+    nativeNetworkClasses.length > 0 ||
+    (hasDoH && hasBlockchainEndpoint) ||
+    eth.size > 0;
+
+  if (knownBad) flag('red', 'Known malware (hash match)', knownBad, 100);
+  if (familyMatches.length) {
+    const fam = familyMatches[0];
+    flag('red', fam.title, fam.desc, knownBad ? 0 : 45);
+  }
+  if (classRisk.length && classRisk[0].score >= 70 && !knownBad) {
+    flag('red', 'High-risk behavior cluster',
+         `${topRiskSummary(classRisk)} Multiple risky behaviors are concentrated in this source file.`,
+         30);
+  } else if (classRisk.length && classRisk[0].score >= 45 && !knownBad) {
+    flag('orange', 'Suspicious behavior cluster',
+         `${topRiskSummary(classRisk)} Review this file before compiling or running it.`,
+         18);
+  }
+  if (sessionExfilClasses.length > 0) {
+    flag('red', 'Session token exfiltration pattern',
+         'Session/auth references appear alongside exfiltration, webhook, loader, persistence, or payload-hiding indicators. Normal Microsoft/Xbox/Mojang account-login flows are ignored.',
+         35);
+  }
+  if (networkDynloadClasses.length > 0) {
+    flag('red', 'Network + dynamic class loading',
+         'HTTP/socket APIs and defineClass / URLClassLoader appear in the same source. This is the downloader pattern: fetch code from a server and run it.',
+         30);
+  }
+  if (eth.size > 0) {
+    flag('red', `Hardcoded Ethereum address${eth.size > 1 ? 'es' : ''}`,
+         `Found ${eth.size} crypto address(es) in plaintext. Often used for "EtherHiding" — storing the actual C2 URL on a smart contract so it can be rotated without updating the malware.`,
+         25);
+  }
+  if (apiHits.stackwalk) {
+    flag('orange', 'StackWalker.getCallerClass usage',
+         'A common obfuscation technique: strings are decrypted with a key derived from the caller class name, defeating naive string extraction.',
+         20);
+  }
+  if (escapeCount >= 8) {
+    flag('orange', '\\uXXXX escapes used heavily in source',
+         `${escapeCount} unicode escape sequences found. Java decodes \\u before tokenization, so this is a classic way to hide identifiers like "Run\\u0074ime" or encoded strings from grep-based scans.`,
+         18);
+  } else if (escapeCount >= 3) {
+    flag('yellow', 'Some \\uXXXX escapes in source',
+         `${escapeCount} unicode escape(s) found. Can be legitimate (i18n, special characters) or a mild obfuscation hint.`,
+         6);
+  }
+  if (obfRatio > 0.3 && identList.length >= 10) {
+    flag('orange', 'Heavy identifier obfuscation',
+         `${(obfRatio * 100).toFixed(0)}% of the ${identList.length} distinct identifiers are single-character or l/I/1/0-style confusable names. Name obfuscation alone is not malware, but it raises review priority.`,
+         15);
+  }
+  if (hasDoH) {
+    flag('orange', 'DNS-over-HTTPS endpoints',
+         'Uses Cloudflare/Google DoH endpoints — sometimes used to resolve C2 domains without going through the OS resolver.',
+         15);
+  }
+  if (webhookNetworkClasses.length > 0 || (apiHits.webhook && (apiHits.fs_creds || apiHits.session))) {
+    flag('orange', 'Webhook/paste exfiltration shape',
+         'Webhook or paste endpoints are present. Review for token or system-info exfiltration.',
+         18);
+  }
+  if (nativeNetworkClasses.length > 0) {
+    flag('orange', 'Native library loading with network code',
+         'Native loading appears alongside network APIs. Deserves manual review.',
+         14);
+  }
+  if (apiHits.fs_creds) {
+    if (credentialNetworkClasses.length > 0 || webhookNetworkClasses.length > 0) {
+      flag('orange', 'Credential/browser storage paths with outbound path',
+           'References to browser credential/cookie stores or launcher account tokens, with outbound network or webhook context.',
+           15);
+    } else {
+      flag('yellow', 'Local launcher/browser storage paths referenced',
+           'References to browser, Discord, Steam, or launcher storage paths. Not treated as theft without outbound exfiltration evidence.',
+           4);
+    }
+  }
+  if (apiHits.persist && !knownBad) {
+    flag('yellow', 'Persistence-adjacent strings',
+         'References to javaw.exe, java.home, or Startup. Could be benign (self-relaunch) or part of persistence.',
+         10);
+  }
+  if ((highEntropy >= 4 || encodedStrings >= 4) && hasHardEncryptionContext) {
+    flag('red', 'Encoded payload strings',
+         `${highEntropy} high-entropy and ${encodedStrings} encoded-looking constant(s) alongside downloader/exfiltration context.`,
+         20);
+  } else if (highEntropy >= 4 || encodedStrings >= 4) {
+    flag('yellow', 'Encoded or high-entropy strings',
+         `${highEntropy} high-entropy and ${encodedStrings} encoded-looking constant(s). Possible obfuscation; not treated as malware without other evidence.`,
+         6);
+  }
+
+  if (score > 100) score = 100;
+
+  return {
+    fileName: file.name, size, hash,
+    sourceMode: true,
+    sourcePackage: packageName,
+    sourceTopType: topType,
+    sourceIdentifierCount: identList.length,
+    sourceShortIdentCount: shortIdents,
+    sourceUnicodeEscapes: escapeCount,
+    classFiles: 1,
+    thirdParty: 1,
+    obfuscatedCount, obfPct, strongObfuscatedCount, strongObfPct,
+    pkgCount,
+    apiHits, classHits, classStats, classRisk, familyMatches,
+    urls: [...urls], ips: [...ips], eth: [...eth],
+    highEntropy, highEntropyClassCount, encodedStrings, encodedClassCount,
+    scoredHighEntropy: highEntropy, scoredHighEntropyClassCount: highEntropyClassCount,
+    totalStrings, metaText: '', fabricJson: null,
+    partialClassCount: 0, partialClassExamples: [],
+    bytecodeFindings: [],
+    score, flags, knownBad, wurstProfile: false
+  };
+}
+
+// ─── The actual scan ─────────────────────────────────────────────────────
+
+async function scan(file, setProgress) {
+  const noopProgress = () => {};
+  const reportProgress = setProgress || noopProgress;
+  reportProgress(0, 0, 'reading file');
+  const buf = await file.arrayBuffer();
+  const size = buf.byteLength;
+  reportProgress(0, 0, 'hashing');
+  const hash = await sha256Hex(buf);
+
+  let zip;
+  try {
+    zip = await JSZip.loadAsync(buf);
+  } catch (e) {
+    throw new Error('Not a valid .jar (zip) file');
+  }
+
+  const names = Object.keys(zip.files).filter(n => !zip.files[n].dir);
+  const classFiles = names.filter(n => n.endsWith('.class'));
+
+  // Metadata
+  let metaText = '';
+  let fabricJson = null;
+  for (const m of ['fabric.mod.json', 'META-INF/mods.toml', 'mcmod.info', 'META-INF/MANIFEST.MF']) {
+    if (names.includes(m)) {
+      try {
+        const { raw, preview } = await readMetadataFile(zip, m);
+        metaText += `\n${m}:\n${preview}\n`;
+        if (m === 'fabric.mod.json') {
+          if (raw.length <= META_PARSE_LIMIT) {
+            try { fabricJson = JSON.parse(raw); } catch (e) {}
+          } else {
+            metaText += `fabric.mod.json skipped JSON parse because it is unusually large (${raw.length.toLocaleString()} chars).\n`;
+          }
+        }
+      } catch (e) {}
+    }
+  }
+
+  // Class analysis
+  const thirdParty = classFiles.filter(n => !isLegitPackage(n));
+  let obfuscatedCount = 0;
+  let strongObfuscatedCount = 0;
+  const pkgCount = new Map();
+  const classStats = {};    // class name -> obfuscation/string metrics
+  let partialClassCount = 0;
+  const partialClassExamples = [];
+  // Forensic detail: a maliciously crafted jar can scatter bogus CP tags
+  // across many class files to hide constants from naive scanners, so we
+  // store up to 100 examples (vs the previous cap of 5) and surface them in
+  // a dedicated section. 100 is well above the "show me 50+" threshold and
+  // also cheap enough to keep the DOM small even on pathological inputs.
+  const MAX_PARTIAL_EXAMPLES = 100;
+
+  for (const cn of classFiles) {
+    classStats[cn] = makeClassStats(cn);
+  }
+
+  for (const cn of thirdParty) {
+    const parts = cn.split('/');
+    if (parts.length > 1) {
+      pkgCount.set(parts[0], (pkgCount.get(parts[0]) || 0) + 1);
+    }
+    const simple = parts[parts.length - 1].replace(/\.class$/, '');
+    const nameScore = obfuscationNameScore(simple);
+    if (nameScore >= 45) obfuscatedCount++;
+    if (nameScore >= 70) strongObfuscatedCount++;
+  }
+  const obfPct = thirdParty.length ? (100 * obfuscatedCount / thirdParty.length) : 0;
+  const strongObfPct = thirdParty.length ? (100 * strongObfuscatedCount / thirdParty.length) : 0;
+
+  // Scan strings & APIs across all classes
+  const apiHits = {};      // category -> Set of class names
+  const classHits = {};    // class name -> Set of categories hit in that class
+  const urls = new Set();
+  const ips = new Set();
+  const eth = new Set();
+  let highEntropy = 0;
+  let encodedStrings = 0;
+  let totalStrings = 0;
+  let highEntropyClassCount = 0;
+  let encodedClassCount = 0;
+
+  function addApiHit(cn, cat) {
+    if (cat === 'session' && isBenignSessionClass(cn)) return;
+    if (!apiHits[cat]) apiHits[cat] = new Set();
+    apiHits[cat].add(cn);
+    if (!classHits[cn]) classHits[cn] = new Set();
+    classHits[cn].add(cat);
+  }
+
+  let scanIndex = 0;
+  const bytecodeFindings = [];  // [{cn, label, owner, name, desc, form, cat}]
+  for (const cn of classFiles) {
+    let cdata;
+    try { cdata = await zip.file(cn).async('uint8array'); } catch (e) { continue; }
+    const stats = classStats[cn] || (classStats[cn] = makeClassStats(cn));
+    const parsed = parseClassFileForBytecode(cdata.buffer.slice(cdata.byteOffset, cdata.byteOffset + cdata.byteLength));
+    const strings = parsed.strings;
+    if (parsed.partial) {
+      partialClassCount++;
+      if (partialClassExamples.length < MAX_PARTIAL_EXAMPLES) {
+        partialClassExamples.push({ cn, reason: parsed.partialReason });
+      }
+    }
+
+    // ── Bytecode-level rule pass. Every resolved invoke / new / LDC Class
+    // is checked against BYTECODE_RULES. Matches feed the same apiHits
+    // map the string scanner writes to, so the existing class-cluster
+    // scoring sees them. The findings are also captured separately for
+    // the "method calls" UI section so the user can see exactly which
+    // API was reached, not just the category. ────────────────────────
+    // Collect bytecode hits in a pending list first. We need to know the
+    // FULL set of categories this class touches via bytecode before we can
+    // decide whether the class is benign context — e.g. a `Class.forName`
+    // alone in a class that has no loader/network/credential evidence is a
+    // soft-dependency check, not a malware downloader. Once committed, the
+    // hits feed apiHits/classHits and bytecodeFindings the same way they
+    // used to.
+    const pendingHits = [];   // { rule, op, owner, name, desc, form }
+    for (const inv of parsed.invokes) {
+      for (const rule of BYTECODE_RULES) {
+        if (ruleMatchesCall(rule, inv.owner, inv.name, 'invoke')) {
+          pendingHits.push({ rule, op: inv.op, owner: inv.owner, name: inv.name, desc: inv.desc, form: 'invoke' });
+        }
+      }
+    }
+    for (const ni of parsed.newInstances) {
+      for (const rule of BYTECODE_RULES) {
+        if (ruleMatchesCall(rule, ni.owner, undefined, 'new')) {
+          pendingHits.push({ rule, op: 'NEW', owner: ni.owner, name: '<init>', desc: '', form: 'new' });
+        }
+      }
+    }
+    for (const cc of parsed.classConsts) {
+      for (const rule of BYTECODE_RULES) {
+        if (ruleMatchesCall(rule, cc.owner, undefined, 'classconst')) {
+          pendingHits.push({ rule, op: 'LDC', owner: cc.owner, name: '', desc: '', form: 'classconst' });
+        }
+      }
+    }
+
+    // ── Benign-context filter. Each helper returns the set of categories
+    // it suppresses (or null if it doesn't apply). Suppression is PER
+    // CATEGORY, not class-wide — so a Runtime.exec inside a class that
+    // ALSO does a soft-dependency Class.forName still gets flagged
+    // (process stays active even though dynload is suppressed). This was
+    // the bug that previously let a Runtime.exec slip through when the
+    // same class happened to look like a soft-dep check.
+    const pendingCats = new Set(pendingHits.map(h => h.rule.cat));
+    const simpleClassName = String(cn).split('/').pop().replace(/\.class$/, '').toLowerCase();
+    const dottedClassName = classToJavaName(cn).toLowerCase();
+
+    // Build a fast lookup over plaintext strings in this class. We need
+    // this for evidence checks that string-only behavior reveals (helper-
+    // JVM command building, system-property reads), not just call sites.
+    // strings are Uint8Array — decode lazily and cache as a single joined
+    // blob so we can substring-search without per-call decoding cost.
+    let classTextBlob = null;
+    function classText() {
+      if (classTextBlob !== null) return classTextBlob;
+      const parts = [];
+      for (const sBytes of strings) {
+        const decoded = decodeModifiedUtf8(sBytes);
+        // Skip JVM metadata (descriptors, internal class names) — they
+        // pollute substring matches. The benign signals we look for are
+        // all human-typed property names like "java.home" or "-cp".
+        if (!isLikelyJvmMetadataString(decoded)) parts.push(decoded);
+      }
+      classTextBlob = parts.join('\n');
+      return classTextBlob;
+    }
+
+    // List of LDC class constants from this class, used for version-compat
+    // reflection check. Note: parsed.classConsts captures CONSTANT_Class
+    // references reached via LDC; for reflective access to a NAMED Minecraft
+    // class, the Class.forName argument is a regular String constant and
+    // won't appear here — we look at strings for that. But for class-literal
+    // reflection (Foo.class.getDeclaredField(...)), the owner shows up as
+    // an LDC Class constant.
+    const ldcClassOwners = (parsed.classConsts || []).map(c => c.owner);
+
+    function browserLauncherSuppression() {
+      if (!pendingCats.has('process')) return null;
+      const dangerousOther = pendingCats.has('dynload') || pendingCats.has('jarload') ||
+                              pendingCats.has('native') || pendingCats.has('webhook');
+      if (dangerousOther) return null;
+      const nameHint = ['operatingsystem', 'os', 'browser', 'platform', 'util', 'desktop', 'links']
+        .some(h => simpleClassName.includes(h)) || dottedClassName.includes('.util');
+      const procHits = pendingHits.filter(h => h.rule.cat === 'process');
+      const onlyExec = procHits.every(h => h.owner === 'java/lang/Runtime' && h.name === 'exec');
+      return (nameHint && onlyExec && procHits.length <= 2)
+        ? { cats: ['process'], reason: 'browser launcher' } : null;
+    }
+
+    function helperJvmProcessSuppression() {
+      // Shape: a ProcessBuilder constructed with the current JVM's own
+      // java binary path plus `-cp` and a class name from the same JAR.
+      // Wurst's `MultiProcessingUtils` is the motivating case — it
+      // re-launches Minecraft helper logic in a child JVM so Microsoft
+      // OAuth login can't crash the game. This is fundamentally
+      // different from `Runtime.exec("calc")` because the command is
+      // pinned to "spawn another instance of the same JVM with our own
+      // bundled class," not arbitrary attacker-controlled binaries.
+      //
+      // Evidence required (ALL of):
+      //   - process category present
+      //   - no dynload/jarload/native/webhook/persist in same class
+      //   - ProcessBuilder (not Runtime.exec — Runtime.exec helper-JVM
+      //     spawners are vanishingly rare in practice; ProcessBuilder is
+      //     the idiomatic way to build a long arg list)
+      //   - plaintext strings reference at least TWO of: "-cp" / "-classpath"
+      //     / "java.home" / "java.class.path" / "javaw" / "java.exe"
+      if (!pendingCats.has('process')) return null;
+      const dangerousOther = pendingCats.has('dynload') || pendingCats.has('jarload') ||
+                              pendingCats.has('native') || pendingCats.has('webhook') ||
+                              pendingCats.has('persist');
+      if (dangerousOther) return null;
+      const procHits = pendingHits.filter(h => h.rule.cat === 'process');
+      const allProcessBuilder = procHits.length > 0 && procHits.every(h =>
+        h.owner === 'java/lang/ProcessBuilder');
+      if (!allProcessBuilder) return null;
+
+      const text = classText();
+      const jvmSelfSpawnSignals = [
+        '-cp', '-classpath', 'java.home', 'java.class.path', 'javaw', 'java.exe',
+        'getJavaDir', 'getClasspath', 'sun.java.command'
+      ];
+      const found = jvmSelfSpawnSignals.filter(sig => text.includes(sig));
+      return found.length >= 2 ? { cats: ['process'], reason: 'child-JVM helper' } : null;
+    }
+
+    function localWebUiWithProcessSuppression() {
+      // Shape: the class uses both com.sun.net.httpserver (local HTTP
+      // server) and ProcessBuilder/Runtime.exec — the standard recipe
+      // for "host a localhost web UI and open the default browser
+      // pointed at it." Orchard's `WebClickGuiServer` is the motivating
+      // case. The string-side scanner already has
+      // `isLocalWebUiBridgeClass`, but it bails when process is also
+      // present; the bytecode side missed it entirely.
+      //
+      // Evidence required (ALL of):
+      //   - process category present
+      //   - no dynload/jarload/native/webhook/persist (those would push
+      //     this back into "downloader" territory)
+      //   - class makes invokes to com/sun/net/httpserver/HttpServer
+      //     (i.e. it IS the localhost server, not just adjacent to one)
+      //   - OR class hits local_web bytecode rules (we haven't added
+      //     httpserver to BYTECODE_RULES yet — falling back to invoke
+      //     scan against parsed.invokes directly)
+      if (!pendingCats.has('process')) return null;
+      const dangerousOther = pendingCats.has('dynload') || pendingCats.has('jarload') ||
+                              pendingCats.has('native') || pendingCats.has('webhook') ||
+                              pendingCats.has('persist');
+      if (dangerousOther) return null;
+      const hasHttpServerInvoke = (parsed.invokes || []).some(inv =>
+        inv.owner === 'com/sun/net/httpserver/HttpServer' ||
+        inv.owner === 'com/sun/net/httpserver/HttpExchange' ||
+        inv.owner === 'com/sun/net/httpserver/HttpContext');
+      return hasHttpServerInvoke
+        ? { cats: ['process'], reason: 'local web-UI bridge' } : null;
+    }
+
+    function desktopOpenLauncherSuppression() {
+      // Shape: ProcessBuilder/Runtime.exec in a class that ALSO calls
+      // java.awt.Desktop.{open,browse,edit} — the common cross-platform
+      // pattern "try Desktop.open() first, fall back to spawning xdg-open
+      // or `cmd /c start` via ProcessBuilder if Desktop is headless."
+      // Orchard's `altmask/aaaaalc` is the motivating case (it's a file
+      // utility class that opens result files in the OS default app).
+      //
+      // Evidence required (ALL of):
+      //   - process category present
+      //   - no dynload/jarload/native/webhook (Desktop.open + downloader
+      //     would still be malware-shaped)
+      //   - class invokes java.awt.Desktop methods (open/browse/edit)
+      if (!pendingCats.has('process')) return null;
+      const dangerousOther = pendingCats.has('dynload') || pendingCats.has('jarload') ||
+                              pendingCats.has('native') || pendingCats.has('webhook');
+      if (dangerousOther) return null;
+      const hasDesktopOpen = (parsed.invokes || []).some(inv =>
+        inv.owner === 'java/awt/Desktop' &&
+        (inv.name === 'open' || inv.name === 'browse' || inv.name === 'edit'));
+      return hasDesktopOpen
+        ? { cats: ['process'], reason: 'Desktop.open file launcher' } : null;
+    }
+
+    function versionCompatReflectionSuppression() {
+      // Shape: Class.forName lookups paired with reflective
+      // Method/Field/setAccessible against Minecraft / Fabric / Java
+      // internal classes — the standard pattern mods use to bind to
+      // remapped or version-changing Minecraft internals from a static
+      // initializer. Orchard's `aaaaaen` and `aaaaaeg` are dense
+      // versions of this (dozens of `private static final Method/Field`
+      // entries, all initialized once via reflection). Fabric's
+      // `WorldRenderEvents$AfterEntitiesEvent` shim is the same shape.
+      //
+      // Critical: this suppresses BOTH dynload AND reflection together,
+      // because that's the package — Class.forName alone (without
+      // reflective Method/Field/invoke) is already handled by
+      // `softDependencyForNameSuppression`. The dangerous version of
+      // this pattern looks up an ATTACKER-supplied class name (from a
+      // URL, a decrypted constant, etc.). The benign version looks up
+      // a Minecraft / Fabric / JDK-internal class name.
+      //
+      // Evidence required (ALL of):
+      //   - dynload OR reflection present
+      //   - no jarload/native/webhook/persist/stackwalk in same class
+      //   - no process spawn in same class (a class that does
+      //     Class.forName + reflective invoke + Runtime.exec is the
+      //     attacker shape)
+      //   - the class has plaintext strings referring to Minecraft
+      //     (net/minecraft, net.minecraft, class_), Fabric (net/fabricmc,
+      //     net.fabricmc), or JDK-internal (java/lang, sun/, jdk/internal)
+      //     class names. We count distinct families: a class with ≥2
+      //     such references is treated as a compat shim.
+      //   - the count of those references should be ≥2 (one MC ref +
+      //     one JDK ref counts) OR the class has ≥3 reflective Method/
+      //     Field static field declarations (the dense shim pattern)
+      const hasDynload = pendingCats.has('dynload');
+      const hasReflection = pendingCats.has('reflection');
+      if (!hasDynload && !hasReflection) return null;
+      const dangerousOther = pendingCats.has('jarload') || pendingCats.has('native') ||
+                              pendingCats.has('webhook') || pendingCats.has('persist') ||
+                              pendingCats.has('stackwalk') || pendingCats.has('process');
+      if (dangerousOther) return null;
+
+      const text = classText();
+      const compatRefPatterns = [
+        'net/minecraft/', 'net.minecraft.', 'class_',
+        'net/fabricmc/', 'net.fabricmc.',
+        'java/lang/', 'java.lang.', 'sun/', 'jdk/internal/', 'jdk.internal.'
+      ];
+      const compatRefs = compatRefPatterns.filter(p => text.includes(p)).length;
+      if (compatRefs >= 2) {
+        const cats = [];
+        if (hasDynload) cats.push('dynload');
+        if (hasReflection) cats.push('reflection');
+        return { cats, reason: 'Minecraft/Fabric compat reflection' };
+      }
+      return null;
+    }
+
+    function softDependencyForNameSuppression() {
+      if (!pendingCats.has('dynload')) return null;
+      const dynloadHits = pendingHits.filter(h => h.rule.cat === 'dynload');
+      const onlyForName = dynloadHits.length === 1 &&
+                          dynloadHits[0].owner === 'java/lang/Class' &&
+                          dynloadHits[0].name === 'forName';
+      if (!onlyForName) return null;
+      // Soft-dep check is suspicious if paired with ANY other dangerous
+      // category — process spawn, reflective invoke, network, jarload,
+      // native, or webhook. Reflection lookup alone (getMethod/getField)
+      // is benign (used to check API availability). Reflective INVOKE on
+      // the looked-up method is the dangerous form.
+      const followUp = pendingCats.has('network') || pendingCats.has('jarload') ||
+                       pendingCats.has('native') || pendingCats.has('webhook') ||
+                       pendingCats.has('process') || pendingCats.has('stackwalk') ||
+                       pendingHits.some(h => h.rule.cat === 'reflection' && h.name === 'invoke');
+      return followUp ? null : { cats: ['dynload'], reason: 'soft-dependency check' };
+    }
+
+    function lanCoordinationSuppression() {
+      if (!pendingCats.has('network')) return null;
+      const networkHits = pendingHits.filter(h => h.rule.cat === 'network');
+      const allSockets = networkHits.length > 0 && networkHits.every(h =>
+        h.owner === 'java/net/Socket' || h.owner === 'javax/net/ssl/SSLSocket');
+      if (!allSockets) return null;
+      const dangerousOther = pendingCats.has('dynload') || pendingCats.has('jarload') ||
+                              pendingCats.has('webhook') || pendingCats.has('native') ||
+                              pendingCats.has('process');
+      if (dangerousOther) return null;
+      const nameHint = ['proxy', 'swarm', 'bot', 'lan', 'localserver', 'p2p', 'multiplayer']
+        .some(h => simpleClassName.includes(h)) ||
+        ['.proxy.', '.swarm.', '.lan.', '.p2p.'].some(h => dottedClassName.includes(h));
+      return nameHint ? { cats: ['network'], reason: 'LAN/proxy socket' } : null;
+    }
+
+    function base64Suppression() {
+      if (!pendingCats.has('encoding')) return null;
+      const dangerousOther = pendingCats.has('dynload') || pendingCats.has('jarload') ||
+                              pendingCats.has('process') || pendingCats.has('webhook') ||
+                              pendingCats.has('native') || pendingCats.has('stackwalk');
+      if (dangerousOther) return null;
+      const networkClientHits = pendingHits.filter(h =>
+        h.rule.cat === 'network' && h.owner !== 'java/net/Socket' && h.owner !== 'javax/net/ssl/SSLSocket');
+      if (networkClientHits.length > 0) return null;
+      const reflectionInvoke = pendingHits.some(h =>
+        h.rule.cat === 'reflection' && h.name === 'invoke');
+      if (reflectionInvoke) return null;
+      return { cats: ['encoding'], reason: 'context-free Base64' };
+    }
+
+    function pluginRegistryReflectionSuppression() {
+      if (!pendingCats.has('reflection')) return null;
+      const dangerousOther = pendingCats.has('dynload') || pendingCats.has('jarload') ||
+                              pendingCats.has('webhook') || pendingCats.has('native') ||
+                              pendingCats.has('process') || pendingCats.has('stackwalk') ||
+                              pendingCats.has('network');
+      if (dangerousOther) return null;
+      return { cats: ['reflection'], reason: 'plugin/registry reflection' };
+    }
+
+    // Build per-category suppression map { cat -> reason }. Order matters
+    // only when two rules would suppress the same category — the first
+    // one to fire wins, so put the more specific rules earlier so their
+    // reason text shows in the UI.
+    const suppressedCats = new Map();
+    for (const fn of [helperJvmProcessSuppression,
+                      localWebUiWithProcessSuppression,
+                      desktopOpenLauncherSuppression,
+                      browserLauncherSuppression,
+                      versionCompatReflectionSuppression,
+                      softDependencyForNameSuppression,
+                      lanCoordinationSuppression,
+                      base64Suppression,
+                      pluginRegistryReflectionSuppression]) {
+      const result = fn();
+      if (!result) continue;
+      for (const c of result.cats) {
+        if (!suppressedCats.has(c)) suppressedCats.set(c, result.reason);
+      }
+    }
+
+    // Commit. Each hit checks its own category against the per-category
+    // suppression map. Suppressed hits stay in bytecodeFindings (with a
+    // flag + reason) for transparency in the UI, but only non-suppressed
+    // hits feed apiHits/classHits and the "Dangerous API calls" flag.
+    for (const ph of pendingHits) {
+      const reason = suppressedCats.get(ph.rule.cat);
+      const isSuppressed = reason !== undefined;
+      const hit = {
+        cat: ph.rule.cat, label: ph.rule.label,
+        owner: ph.owner, name: ph.name, desc: ph.desc,
+        form: ph.form, op: ph.op,
+        suppressed: isSuppressed,
+        suppressionReason: isSuppressed ? reason : ''
+      };
+      if (!isSuppressed) {
+        addApiHit(cn, ph.rule.cat);
+        if (ph.rule.cat === 'network') stats.networkApiRefs++;
+      }
+      stats.bytecodeHits.push(hit);
+      bytecodeFindings.push({ cn, ...hit });
+    }
+    for (const s of strings) {
+      totalStrings++;
+      stats.stringCount++;
+      stats.byteCount += s.length;
+      const ss = decodeModifiedUtf8(s);
+
+      if (hasGoogleTranslateString(ss)) {
+        stats.translationHints++;
+      }
+      if (hasMinecraftAccountAuthString(ss)) {
+        stats.authHints++;
+      }
+      if (hasBrowserLauncherCommandString(ss)) {
+        stats.browserLaunchHints++;
+      }
+
+      for (const [cat, pats] of Object.entries(SUSPICIOUS_REFS)) {
+        for (const p of pats) {
+          if (matchesSuspiciousRef(cat, ss, p)) {
+            addApiHit(cn, cat);
+            if (cat === 'network') stats.networkApiRefs++;
+            break;
+          }
+        }
+      }
+
+      for (const u of extractUrlsFromString(ss)) {
+        urls.add(u);
+        stats.urls++;
+        addApiHit(cn, 'network');
+        if (isLikelyBenignExternalLink(u)) stats.benignLinkUrls++;
+        else stats.suspiciousUrls++;
+        if (hasGoogleTranslateString(u)) stats.translationHints++;
+        if (hasMinecraftAccountAuthString(u)) stats.authHints++;
+        if (u.includes('discord.com/api/webhooks') || u.includes('discordapp.com/api/webhooks')) {
+          addApiHit(cn, 'webhook');
+        }
+      }
+      for (const ethMatch of String(ss).matchAll(ETH_RE)) {
+        eth.add(ethMatch[0]);
+        stats.eth++;
+      }
+      for (const ipMatch of String(ss).matchAll(IP_RE)) {
+        const ip = ipMatch[0];
+        const parts = ip.split('.').map(Number);
+        if (parts.every(p => p >= 0 && p <= 255) &&
+            !ip.startsWith('0.') && !ip.startsWith('127.') && !ip.startsWith('255.')) {
+          ips.add(ip);
+          stats.ips++;
+        }
+      }
+
+      if (looksEncodedAscii(ss)) {
+        encodedStrings++;
+        stats.encoded++;
+      }
+      if (looksSuspiciousHighEntropyString(s, ss)) {
+        highEntropy++;
+        stats.highEntropy++;
+      }
+    }
+    if (stats.highEntropy > 0) highEntropyClassCount++;
+    if (stats.encoded > 0) encodedClassCount++;
+
+    scanIndex++;
+    if (scanIndex % SCAN_YIELD_EVERY === 0) {
+      reportProgress(scanIndex, classFiles.length, 'scanning class');
+      await yieldToEventLoop();
+    }
+  }
+  reportProgress(classFiles.length, classFiles.length, 'finalising');
+
+  const wurstProfile = isKnownWurstProfile({ names, fabricJson });
+  const classRisk = summarizeClassRisks(classStats, classHits, { isWurstProfile: wurstProfile });
+  const familyMatches = detectFamilyMatches({ hash, names, classFiles, fabricJson, metaText, classRisk, apiHits, classHits, classStats });
+
+  // ─── Score it ───────────────────────────────────────────────────────────
+  let score = 0;
+  const flags = [];
+  const knownBad = KNOWN_BAD[hash];
+
+  function flag(sev, title, desc, points) {
+    flags.push({ sev, title, desc });
+    score += points;
+  }
+
+  function classesWithAll(...cats) {
+    const out = [];
+    for (const [cn, hits] of Object.entries(classHits)) {
+      if (cats.every(cat => hits.has(cat))) out.push(cn);
+    }
+    return out;
+  }
+
+  const networkDynloadClasses = classesWithAll('network', 'dynload').filter(cn => {
+    const st = classStats[cn] || {};
+    const hits = classHits[cn] || new Set();
+    const realOutbound = (st.networkApiRefs > 0) || (st.suspiciousUrls > 0) || (st.ips > 0) || hits.has('webhook');
+    return realOutbound && !shouldSuppressKnownBenignClassSignal(cn, st, hits, { isWurstProfile: wurstProfile });
+  });
+  const networkProcessClasses = classesWithAll('network', 'process');
+  const sessionNetworkClasses = classesWithAll('session', 'network');
+  const credentialNetworkClasses = classesWithAll('fs_creds', 'network');
+  const reflectionDecodeClasses = Object.entries(classStats).filter(([cn, st]) => {
+    const hits = classHits[cn] || new Set();
+    if (!hits.has('reflection')) return false;
+    const payloadLike = st.highEntropy >= 2 || st.encoded >= 2;
+    const hardPayloadContext = hits.has('dynload') || hits.has('jarload') || hits.has('webhook') ||
+      (hits.has('fs_creds') && hits.has('network')) ||
+      (hits.has('network') && payloadLike && (st.urls > 0 || st.ips > 0));
+    return payloadLike && hardPayloadContext && (hits.has('encoding') || hits.has('stackwalk') || hardPayloadContext);
+  }).map(([cn]) => cn);
+  const scoredReflectionDecodeClasses = reflectionDecodeClasses.filter(cn =>
+    !shouldSuppressKnownBenignClassSignal(cn, classStats[cn], classHits[cn] || new Set(), { isWurstProfile: wurstProfile })
+  );
+  const scoredNetworkProcessClasses = networkProcessClasses.filter(cn =>
+    !shouldSuppressKnownBenignClassSignal(cn, classStats[cn], classHits[cn] || new Set(), { isWurstProfile: wurstProfile })
+  );
+  const scoredHighEntropy = Object.entries(classStats).reduce((sum, [cn, st]) =>
+    sum + (shouldSuppressKnownBenignClassSignal(cn, st, classHits[cn] || new Set(), { isWurstProfile: wurstProfile }) ? 0 : st.highEntropy), 0
+  );
+  const scoredHighEntropyClassCount = Object.entries(classStats).filter(([cn, st]) =>
+    st.highEntropy > 0 && !shouldSuppressKnownBenignClassSignal(cn, st, classHits[cn] || new Set(), { isWurstProfile: wurstProfile })
+  ).length;
+  const webhookNetworkClasses = classesWithAll('webhook', 'network');
+  const nativeNetworkClasses = classesWithAll('native', 'network');
+  const riskyObfClasses = classRisk.filter(r => r.stats.nameScore >= 45 && r.score >= 45);
+  const hasDoH = [...urls].some(u => DOH_HINTS.some(h => u.toLowerCase().includes(h)));
+  const hasBlockchainEndpoint = [...urls].some(u => BLOCKCHAIN_HINTS.some(h => u.toLowerCase().includes(h)));
+  const sessionExfilClasses = sessionNetworkClasses.filter(cn =>
+    hasHardSessionExfilClassSignal(cn, classStats[cn], classHits[cn] || new Set()) || knownBad
+  );
+
+  const hasHardEncryptionContext =
+    knownBad ||
+    familyMatches.length > 0 ||
+    credentialNetworkClasses.length > 0 ||
+    webhookNetworkClasses.length > 0 ||
+    networkDynloadClasses.length > 0 ||
+    nativeNetworkClasses.length > 0 ||
+    (hasDoH && hasBlockchainEndpoint) ||
+    eth.size > 0;
+
+  if (knownBad) {
+    flag('red', 'Known malware (hash match)', knownBad, 100);
+  }
+
+  if (familyMatches.length) {
+    const fam = familyMatches[0];
+    flag('red', fam.title, fam.desc, knownBad ? 0 : 45);
+  }
+
+  if (classRisk.length && classRisk[0].score >= 70 && !knownBad) {
+    flag('red', 'High-risk behavior cluster',
+         `${topRiskSummary(classRisk)} This is stronger than name-obfuscation alone because multiple risky behaviors are concentrated in one class.`,
+         30);
+  } else if (classRisk.length && classRisk[0].score >= 45 && !knownBad) {
+    flag('orange', 'Suspicious behavior cluster',
+         `${topRiskSummary(classRisk)} Review this class in a decompiler before running the mod.`,
+         18);
+  }
+
+  if (sessionExfilClasses.length > 0) {
+    flag('red', 'Session token exfiltration pattern',
+         `Session/auth references are paired with same-class exfiltration, webhook, loader, persistence, or payload-hiding indicators (${sessionExfilClasses.length} class(es)). Normal Microsoft/Xbox/Mojang account-login flows are ignored.`,
+         35);
+  }
+  if (networkDynloadClasses.length > 0) {
+    flag('red', 'Network + dynamic class loading',
+         `Combines HTTP/socket APIs with defineClass / URLClassLoader in the same class (${networkDynloadClasses.length} class(es)). This is the downloader pattern: fetch code from a server and run it.`,
+         30);
+  }
+  if (eth.size > 0) {
+    flag('red', `Hardcoded Ethereum address${eth.size > 1 ? 'es' : ''}`,
+         `Found ${eth.size} crypto address(es) in plaintext. Often used for "EtherHiding" — storing the actual C2 URL on a smart contract so it can be rotated without updating the malware.`,
+         25);
+  }
+  if ((scoredHighEntropy > 20 || scoredHighEntropyClassCount >= 6) && hasHardEncryptionContext) {
+    flag('red', 'Widespread string encryption',
+         `${scoredHighEntropy} payload-like high-entropy strings across ${scoredHighEntropyClassCount} class(es), paired with downloader/exfiltration context — likely encrypted payload or command hiding.`,
+         25);
+  } else if (scoredHighEntropy > 20 || scoredHighEntropyClassCount >= 6) {
+    flag('yellow', 'Heavy string obfuscation',
+         `${scoredHighEntropy} high-entropy constants across ${scoredHighEntropyClassCount} class(es). This is common in private/obfuscated clients and is not treated as malware without downloader, webhook, credential-exfiltration, or known-family evidence.`,
+         6);
+  } else if (scoredHighEntropy >= 8 && scoredReflectionDecodeClasses.length > 0) {
+    flag('orange', 'Likely string decryptor pattern',
+         `High-entropy constants are paired with reflection/decoder APIs in ${scoredReflectionDecodeClasses.length} class(es) and stronger loader/exfiltration context. This often survives simple renaming obfuscators.`,
+         18);
+  }
+  if (scoredReflectionDecodeClasses.length > 0) {
+    flag('orange', 'Reflection + encoded payload helpers',
+         `Reflection/unsafe access is paired with Base64/compression or high-entropy constants in ${scoredReflectionDecodeClasses.length} class(es). This can hide real calls from simple scanners.`,
+         18);
+  }
+  const jarLoaderClasses = Object.entries(classHits).filter(([cn, hits]) =>
+    hits.has('jarload') &&
+    !shouldSuppressKnownBenignClassSignal(cn, classStats[cn], hits, { isWurstProfile: wurstProfile }) &&
+    (hits.has('reflection') || hits.has('dynload') || (classStats[cn] && classStats[cn].highEntropy >= 5))
+  ).map(([cn]) => cn);
+  if (jarLoaderClasses.length > 0) {
+    flag('orange', 'Embedded JAR/resource loader pattern',
+         `JarInputStream/JarEntry usage is paired with reflection, class loading, or encrypted constants in ${jarLoaderClasses.length} class(es). This is common in staged payload loaders.`,
+         16);
+  }
+  if (apiHits.stackwalk) {
+    flag('orange', 'StackWalker.getCallerClass usage',
+         'A common obfuscation technique: strings are decrypted with a key derived from the caller class name, defeating naive string extraction.',
+         20);
+  }
+  if (obfPct > 50) {
+    flag('orange', `Heavy class-name obfuscation (${obfPct.toFixed(0)}%)`,
+         `${obfuscatedCount} of ${thirdParty.length} third-party classes have random-looking names; ${strongObfuscatedCount} are strongly obfuscated. Name obfuscation alone is not malware, but it raises review priority.`,
+         18);
+  } else if (riskyObfClasses.length >= 3) {
+    flag('orange', 'Obfuscated classes with risky behavior',
+         `${riskyObfClasses.length} obfuscated class(es) also contain network, loader, reflection, credential, or encoded-payload indicators.`,
+         18);
+  }
+  if (hasDoH) {
+    flag('orange', 'DNS-over-HTTPS endpoints',
+         'Uses Cloudflare/Google DoH endpoints — sometimes used to resolve C2 domains without going through the OS resolver.',
+         15);
+  }
+  if (webhookNetworkClasses.length > 0 || (apiHits.webhook && (apiHits.fs_creds || apiHits.session))) {
+    flag('orange', 'Webhook/paste exfiltration shape',
+         `Webhook or paste endpoints are present${webhookNetworkClasses.length ? ` in network-capable class(es) (${webhookNetworkClasses.length})` : ''}. Review for token or system-info exfiltration.`,
+         18);
+  }
+  const riskyNetworkProcessClasses = scoredNetworkProcessClasses.filter(cn => {
+    const st = classStats[cn] || {};
+    const hits = classHits[cn] || new Set();
+    const realOutbound = (st.networkApiRefs > 0) || (st.suspiciousUrls > 0) || (st.ips > 0) || hits.has('webhook');
+    return realOutbound && (hits.has('fs_creds') || hits.has('dynload') || hits.has('jarload') || hits.has('webhook') || hits.has('persist') || hits.has('native') || st.suspiciousUrls > 0 || st.ips > 0);
+  });
+  if (riskyNetworkProcessClasses.length > 0) {
+    flag('orange', 'Network + process spawning',
+         `Combines real outbound HTTP/socket behavior with Runtime/ProcessBuilder in the same class (${riskyNetworkProcessClasses.length} class(es)). Browser-link openers are ignored.`,
+         20);
+  }
+  if (nativeNetworkClasses.length > 0) {
+    flag('orange', 'Native library loading with network code',
+         `Native loading appears in the same class as network APIs (${nativeNetworkClasses.length} class(es)). This can be legitimate, but deserves manual review.`,
+         14);
+  }
+  if (apiHits.fs_creds) {
+    if (credentialNetworkClasses.length > 0 || webhookNetworkClasses.length > 0) {
+      flag('orange', 'Credential/browser storage paths with outbound path',
+           `References to browser credential/cookie stores or launcher account tokens in ${apiHits.fs_creds.size} class(es), with outbound network or webhook context.`,
+           15);
+    } else {
+      flag('yellow', 'Local launcher/browser storage paths referenced',
+           `References to browser, Discord, Steam, or launcher storage paths in ${apiHits.fs_creds.size} class(es). This can be normal for local privacy/alt/account-management features and is not treated as theft without outbound exfiltration evidence.`,
+           4);
+    }
+  }
+  if (apiHits.persist && !knownBad) {
+    flag('yellow', 'Persistence-adjacent strings',
+         'References to javaw.exe, java.home, or Startup. Could be benign (self-relaunch) or part of persistence.',
+         10);
+  }
+
+  // Constant-pool parser bailed early on enough classes to be worth flagging.
+  // Sometimes benign (a class file uses a JVM feature this parser doesn't
+  // know how to size yet), sometimes an active evasion against naive
+  // scanners — promote to orange if other malware-shaped evidence exists.
+  // Bytecode walker found at least one actual method call from our rule
+  // table. These are stronger evidence than string matches because they
+  // can't be explained away as documentation, log message text, or
+  // accidental substring matches — the code literally invokes the API.
+  // We report this once with the count of unique findings; the per-class
+  // breakdown lives in the "method calls" UI section.
+  if (bytecodeFindings && bytecodeFindings.length > 0) {
+    const activeFindings = bytecodeFindings.filter(h => !h.suppressed);
+    const uniqueTriples = new Set(activeFindings.map(h => h.cat + '|' + h.owner + '|' + h.name));
+    const dangerousCats = new Set(['process', 'dynload', 'jarload', 'native']);
+    const dangerous = activeFindings.filter(h => dangerousCats.has(h.cat));
+    if (dangerous.length > 0) {
+      flag('orange', 'Dangerous API calls reached via bytecode',
+           `Bytecode walk found ${dangerous.length} call(s) to process/loader/native APIs across ${new Set(dangerous.map(h => h.cn)).size} class(es), after filtering ${bytecodeFindings.length - activeFindings.length} call(s) that matched benign-context shapes (child-JVM helper, local web-UI bridge, Desktop.open launcher, browser launcher, soft-dependency check, Minecraft/Fabric compat reflection, LAN socket, NBT Base64, plugin reflection). See "method calls" section for the exact (owner, name, descriptor) triples.`,
+           12);
+    } else if (uniqueTriples.size >= 8) {
+      flag('yellow', 'Many suspicious API calls reached via bytecode',
+           `Bytecode walk resolved ${uniqueTriples.size} unique suspicious method calls (after benign-context filtering). None are individually dangerous, but the volume is worth a look.`,
+           4);
+    }
+  }
+
+  if (partialClassCount >= 3 && partialClassCount / Math.max(1, classFiles.length) > 0.05) {
+    const promote = hasHardEncryptionContext || (classRisk[0] && classRisk[0].score >= 45);
+    if (promote) {
+      flag('orange', 'Constant-pool parse incomplete on multiple classes',
+           `${partialClassCount} of ${classFiles.length} class file(s) tripped the scanner's parser before the full constant pool was read, alongside other malware-shaped indicators. A deliberately malformed class can use this to hide constants from naive string scanners.`,
+           14);
+    } else {
+      flag('yellow', 'Constant-pool parse incomplete on multiple classes',
+           `${partialClassCount} of ${classFiles.length} class file(s) tripped the scanner's parser before the full constant pool was read. This is sometimes benign (a newer class-file feature than the scanner knows about), but can also be a deliberate way to hide constants from naive string scanners.`,
+           8);
+    }
+  }
+
+  if (score > 100) score = 100;
+
+  return {
+    fileName: file.name, size, hash,
+    classFiles: classFiles.length,
+    thirdParty: thirdParty.length,
+    obfuscatedCount, obfPct, strongObfuscatedCount, strongObfPct,
+    pkgCount: [...pkgCount.entries()].sort((a, b) => b[1] - a[1]).slice(0, 8),
+    apiHits, classHits, classStats, classRisk, familyMatches,
+    urls: [...urls], ips: [...ips], eth: [...eth],
+    highEntropy, highEntropyClassCount, encodedStrings, encodedClassCount,
+    scoredHighEntropy, scoredHighEntropyClassCount, totalStrings, metaText, fabricJson,
+    partialClassCount, partialClassExamples,
+    bytecodeFindings,
+    score, flags, knownBad, wurstProfile
+  };
+}
+
+// ─── Render ───────────────────────────────────────────────────────────────
+
+function fmtSize(n) {
+  if (n < 1024) return n + ' B';
+  if (n < 1024 * 1024) return (n / 1024).toFixed(1) + ' KiB';
+  return (n / 1024 / 1024).toFixed(2) + ' MiB';
+}
+
+function isFabricExampleContact(contact) {
+  if (!contact || typeof contact !== 'object') return false;
+  return contact.homepage === 'https://fabricmc.net/' &&
+         contact.sources === 'https://github.com/FabricMC/fabric-example-mod';
+}
+
+function isWurstModMenuContact(contact) {
+  if (!contact || typeof contact !== 'object') return false;
+  return contact.homepage === 'https://www.wurstclient.net/modmenu-homepage/' &&
+         contact.sources === 'https://www.wurstclient.net/modmenu-sources/' &&
+         contact.issues === 'https://www.wurstclient.net/modmenu-issues/';
+}
+
+function contactTemplateLabel(contact) {
+  if (isFabricExampleContact(contact)) return 'Fabric example mod template contact';
+  if (isWurstModMenuContact(contact)) return 'Wurst Client Mod Menu contact placeholders';
+  return '';
+}
+
+function normalizeEntrypointValue(v) {
+  if (v == null || v === '') return '';
+  if (typeof v === 'string') return v;
+  if (typeof v === 'object') {
+    if (typeof v.value === 'string' && typeof v.adapter === 'string') return `${v.value} (${v.adapter})`;
+    if (typeof v.value === 'string') return v.value;
+    return JSON.stringify(v);
+  }
+  return String(v);
+}
+
+function getEntrypointRows(entrypoints) {
+  if (!entrypoints || typeof entrypoints !== 'object') return [];
+  const rows = [];
+  for (const [group, raw] of Object.entries(entrypoints)) {
+    const vals = (Array.isArray(raw) ? raw : [raw])
+      .map(normalizeEntrypointValue)
+      .filter(Boolean);
+    if (vals.length) rows.push({ group, vals });
+  }
+  return rows;
+}
+
+function formatEntrypointsText(entrypoints) {
+  const rows = getEntrypointRows(entrypoints);
+  return rows.map(r => `${r.group}: ${r.vals.join(', ')}`).join(' · ');
+}
+
+function formatEntrypointsHtml(entrypoints) {
+  const rows = getEntrypointRows(entrypoints);
+  if (!rows.length) return '';
+  return rows.map(r => `
+    <div style="margin-bottom:4px">
+      <span style="color:var(--text-dim);text-transform:uppercase;letter-spacing:0.08em;font-size:10px">${escapeHtml(r.group)}</span>
+      <span>${escapeHtml(r.vals.join(' · '))}</span>
+    </div>
+  `).join('');
+}
+
+function hasWurstEntrypoint(entrypoints) {
+  return getEntrypointRows(entrypoints).some(r =>
+    r.vals.some(v => v === 'net.wurstclient.WurstInitializer' || v.startsWith('net.wurstclient.'))
+  );
+}
+
+function formatContact(contact) {
+  const templateLabel = contactTemplateLabel(contact);
+  if (templateLabel) return templateLabel;
+  if (!contact) return '';
+  if (typeof contact === 'string') return contact;
+  if (typeof contact === 'object') {
+    const parts = [];
+    for (const [k, v] of Object.entries(contact)) {
+      if (v == null || v === '') continue;
+      parts.push(`${k}: ${v}`);
+    }
+    return parts.join(' · ') || JSON.stringify(contact);
+  }
+  return String(contact);
+}
+
+function displayModName(j) {
+  if (j.name) return j.name;
+  if (isFabricExampleContact(j.contact)) return 'Example Mod';
+  if (isWurstModMenuContact(j.contact) || hasWurstEntrypoint(j.entrypoints)) return 'Wurst Client';
+  if (j.id && j.id !== 'modid') return j.id;
+  return '';
+}
+
+function templateMetadataLabel(j) {
+  if (isFabricExampleContact(j.contact)) return 'Fabric example mod metadata detected';
+  if (isWurstModMenuContact(j.contact)) return 'Wurst Client Mod Menu metadata detected';
+  return '';
+}
+
+function sanitizedFabricJsonForDisplay(j) {
+  const sanitized = JSON.parse(JSON.stringify(j));
+  const contactLabel = contactTemplateLabel(j.contact);
+  const entrypointsText = formatEntrypointsText(j.entrypoints);
+  if (contactLabel) sanitized.contact = contactLabel;
+  if (entrypointsText) sanitized.entrypoints = entrypointsText;
+  if (!sanitized.name) {
+    const name = displayModName(j);
+    if (name) sanitized.name = name;
+  }
+  return sanitized;
+}
+
+function metaTextForDisplay(r) {
+  const txt = (r.metaText || '').trim();
+  if (!txt) return '';
+  const j = r.fabricJson;
+  if (!j) return txt;
+
+  // Replace confusing raw template contact JSON and entrypoint JSON with readable labels.
+  const sanitized = sanitizedFabricJsonForDisplay(j);
+  const safeFabric = 'fabric.mod.json:\n' + JSON.stringify(sanitized, null, 2);
+
+  const nextMetaHeader = /\n(?:META-INF\/mods\.toml|mcmod\.info|META-INF\/MANIFEST\.MF):\n/;
+  const match = nextMetaHeader.exec(txt);
+  if (!txt.startsWith('fabric.mod.json:\n')) return txt;
+  if (!match) return safeFabric;
+  return safeFabric + txt.slice(match.index);
+}
+
+function render(r) {
+  const band = bandFor(r.score);
+
+  // Verdict
+  const gauge = document.getElementById('gauge-fill');
+  const circ = 2 * Math.PI * 54; // ≈339.292
+  gauge.style.stroke = SEV_COLORS[band.color];
+  // animate from full offset down to (1-score/100)*circ
+  requestAnimationFrame(() => {
+    gauge.style.strokeDashoffset = circ * (1 - r.score / 100);
+  });
+  animateNum('score-num', r.score, 900);
+
+  document.getElementById('verdict-band').textContent = band.label;
+  document.getElementById('verdict-band').style.color = SEV_COLORS[band.color];
+  document.getElementById('verdict-summary').textContent = band.desc;
+
+  const knownBadEl = document.getElementById('known-bad-banner');
+  if (r.knownBad || (r.familyMatches && r.familyMatches.length)) {
+    knownBadEl.style.display = 'block';
+    knownBadEl.className = 'known-bad';
+    knownBadEl.textContent = r.knownBad
+      ? '⚠ Known malware — hash match in scanner database'
+      : '⚠ Malware-family signature — structural match';
+  } else {
+    knownBadEl.style.display = 'none';
+  }
+
+  // File bar header
+  document.getElementById('fb-name').textContent = r.fileName;
+  document.getElementById('fb-meta').innerHTML =
+    `${fmtSize(r.size)} · sha-256 <span>${r.hash.slice(0, 16)}…</span>`;
+  document.getElementById('file-bar').classList.add('show');
+
+  // File table
+  document.getElementById('file-kv').innerHTML = `
+    <dt>Name</dt><dd>${escapeHtml(r.fileName)}</dd>
+    <dt>Size</dt><dd>${fmtSize(r.size)} (${r.size.toLocaleString()} bytes)</dd>
+    <dt>SHA-256</dt><dd>${r.hash}</dd>
+    <dt>VirusTotal</dt><dd><a href="https://www.virustotal.com/gui/search/${r.hash}" target="_blank" rel="noopener">search hash on VirusTotal ↗</a><br><span style="color:var(--text-dim);font-size:11px">No file is uploaded by modcheck. If VirusTotal has no report for this hash, it may show no results until someone uploads the file there manually.</span></dd>
+  `;
+
+  // Metadata
+  const metaContent = document.getElementById('meta-content');
+  if (r.sourceMode) {
+    const items = [];
+    items.push(`<dt>source type</dt><dd>Java source file (.java)</dd>`);
+    if (r.sourcePackage) items.push(`<dt>package</dt><dd>${escapeHtml(r.sourcePackage)}</dd>`);
+    if (r.sourceTopType) items.push(`<dt>top-level type</dt><dd>${escapeHtml(r.sourceTopType)}</dd>`);
+    items.push(`<dt>identifiers</dt><dd>${r.sourceIdentifierCount} distinct${r.sourceShortIdentCount ? ` (${r.sourceShortIdentCount} single-letter or l/I/1/0-style)` : ''}</dd>`);
+    items.push(`<dt>\\u escapes</dt><dd>${r.sourceUnicodeEscapes}${r.sourceUnicodeEscapes >= 8 ? ' <span style="color:var(--orange)">⚠ heavy obfuscation hint</span>' : r.sourceUnicodeEscapes >= 3 ? ' <span style="color:var(--yellow)">⚠ some escapes</span>' : ''}</dd>`);
+    metaContent.innerHTML = `<dl class="kv">${items.join('')}</dl>
+      <div class="pre" style="margin-top:18px;color:var(--text-dim)">Java source files don't carry mod metadata. Class-name obfuscation is measured from identifier patterns and \\u escape usage instead of the jar's class table.</div>`;
+  } else if (r.fabricJson) {
+    const j = r.fabricJson;
+    const modName = displayModName(j);
+    const templateLabel = templateMetadataLabel(j);
+    const contactText = formatContact(j.contact);
+    const metaPreview = metaTextForDisplay(r);
+    metaContent.innerHTML = `
+      <dl class="kv">
+        ${j.id ? `<dt>id</dt><dd>${escapeHtml(j.id)}</dd>` : ''}
+        ${modName ? `<dt>name</dt><dd>${escapeHtml(modName)}</dd>` : ''}
+        ${j.version ? `<dt>version</dt><dd>${escapeHtml(j.version)}</dd>` : ''}
+        ${j.authors ? `<dt>authors</dt><dd>${escapeHtml(JSON.stringify(j.authors))}</dd>` : ''}
+        ${j.description ? `<dt>description</dt><dd>${escapeHtml(j.description)}</dd>` : ''}
+        ${j.entrypoints ? `<dt>entrypoints</dt><dd>${formatEntrypointsHtml(j.entrypoints)}</dd>` : ''}
+        ${templateLabel ? `<dt>template</dt><dd>${escapeHtml(templateLabel)}</dd>` : ''}
+        ${contactText ? `<dt>contact</dt><dd>${escapeHtml(contactText)}</dd>` : ''}
+      </dl>
+      ${metaPreview ? `<div class="pre" style="margin-top:18px">${escapeHtml(metaPreview)}</div>` : ''}
+    `;
+  } else if (r.metaText) {
+    metaContent.innerHTML = `<div class="pre">${escapeHtml(r.metaText.trim())}</div>`;
+  } else {
+    metaContent.innerHTML = `<div class="pre empty">no fabric.mod.json / mods.toml / mcmod.info found</div>`;
+  }
+
+  // Classes
+  document.getElementById('class-count').textContent = r.sourceMode
+    ? `1 source class`
+    : `${r.classFiles} total · ${r.thirdParty} third-party`;
+  const pkgHtml = r.pkgCount.map(([pkg, c]) => {
+    const sus = obfuscationNameScore(pkg) >= 45;
+    return `<div>${escapeHtml(pkg)} <span style="color:var(--text-dim)">${c}</span>${
+      sus ? ' <span style="color:var(--orange);font-size:10px;text-transform:uppercase;letter-spacing:0.1em">⚠ random-looking root</span>' : ''
+    }</div>`;
+  }).join('');
+  const obfRowHtml = r.sourceMode
+    ? `<dt>Obfuscation score</dt><dd>${r.obfuscatedCount ? 'obfuscated' : 'normal'} (file-level nameScore ${(Object.values(r.classStats)[0] || {}).nameScore || 0}/100)</dd>`
+    : `<dt>Obfuscated names</dt><dd>${r.obfuscatedCount} (${r.obfPct.toFixed(0)}%) · strong ${r.strongObfuscatedCount || 0} (${(r.strongObfPct || 0).toFixed(0)}%)</dd>`;
+  const totalRowLabel = r.sourceMode ? 'Source classes' : 'Total classes';
+  const thirdPartyRow = r.sourceMode ? '' : `<dt>Third-party</dt><dd>${r.thirdParty}</dd>`;
+  const pkgRowLabel = r.sourceMode ? 'Package' : 'Top packages';
+  document.getElementById('class-kv').innerHTML = `
+    <dt>${totalRowLabel}</dt><dd>${r.classFiles}</dd>
+    ${thirdPartyRow}
+    ${obfRowHtml}
+    <dt>${pkgRowLabel}</dt><dd>${pkgHtml || '—'}</dd>
+    <dt>Strings scanned</dt><dd>${r.totalStrings.toLocaleString()}</dd>
+    <dt>High-entropy</dt><dd>${r.highEntropy}${r.highEntropy > 20 ? ' <span style="color:var(--orange)">⚠ obfuscated constants</span>' : r.highEntropy > 5 ? ' <span style="color:var(--orange)">⚠ possible obfuscation</span>' : ''} <span style="color:var(--text-dim)">across ${r.highEntropyClassCount || 0} class(es)</span></dd>
+    <dt>Encoded-looking</dt><dd>${r.encodedStrings || 0} <span style="color:var(--text-dim)">across ${r.encodedClassCount || 0} class(es)</span></dd>
+    ${r.sourceMode ? '' : `<dt>Parse coverage</dt><dd>${r.partialClassCount ? `<span style="color:var(--orange)">${r.partialClassCount} class(es) partially parsed</span>` : 'all classes parsed cleanly'}</dd>`}
+    <dt>Behavior clusters</dt><dd>${(r.classRisk || []).length ? topRiskSummary(r.classRisk) : '—'}</dd>
+    <dt>Endpoint types</dt><dd>${renderEndpointChips(r) || '—'}</dd>
+  `;
+
+  renderDetectedPatterns(r);
+  renderClassRisk(r);
+  renderBytecodeFindings(r);
+  renderPartialParses(r);
+  renderScannerNotes(r);
+
+  // Flags
+  document.getElementById('flag-count').textContent = r.flags.length;
+  const flagList = document.getElementById('flag-list');
+  if (!r.flags.length) {
+    flagList.innerHTML = `<div class="flag sev-green"><div class="body"><div class="title">No indicators tripped</div><div class="desc">The scanner did not find any of the patterns it looks for. This does not guarantee the mod is safe — always verify the source.</div></div><div class="sev-pill">clean</div></div>`;
+  } else {
+    flagList.innerHTML = r.flags.map((f, i) => `
+      <div class="flag sev-${f.sev}" style="animation: fadeIn 0.35s ease ${0.05 + i * 0.05}s both">
+        <div class="body">
+          <div class="title">${escapeHtml(f.title)}</div>
+          <div class="desc">${escapeHtml(f.desc)}</div>
+        </div>
+        <div class="sev-pill">${f.sev === 'red' ? 'severe' : f.sev === 'orange' ? 'suspect' : f.sev === 'yellow' ? 'minor' : 'clean'}</div>
+      </div>
+    `).join('');
+  }
+
+  // Strings
+  const stringRows = [];
+  for (const u of r.urls.sort()) {
+    const ul = u.toLowerCase();
+    let cls = '', tag = 'url';
+    if (DOH_HINTS.some(d => ul.includes(d))) { cls = 'orange'; tag = 'DoH'; }
+    else if (BLOCKCHAIN_HINTS.some(d => ul.includes(d))) { cls = 'red'; tag = 'eth rpc'; }
+    stringRows.push(`<div class="row ${cls}"><span class="tag">${tag}</span><code>${escapeHtml(u)}</code></div>`);
+  }
+  for (const a of r.eth.sort()) {
+    stringRows.push(`<div class="row red"><span class="tag">eth addr</span><code>${escapeHtml(a)}</code></div>`);
+  }
+  for (const ip of r.ips.sort()) {
+    stringRows.push(`<div class="row"><span class="tag">ipv4</span><code>${escapeHtml(ip)}</code></div>`);
+  }
+  document.getElementById('strings-count').textContent =
+    `${r.urls.length} URLs · ${r.eth.length} eth · ${r.ips.length} IPs`;
+  const stringsEl = document.getElementById('strings-content');
+  if (stringRows.length === 0) {
+    stringsEl.innerHTML = `<div class="pre empty">no URLs, IPs, or Ethereum addresses found in plaintext${r.highEntropy > 20 ? ' — ' + r.highEntropy + ' obfuscated/high-entropy constants were detected, but this is not a malware verdict without stronger behavior' : ''}</div>`;
+  } else {
+    stringsEl.innerHTML = `<div class="string-list">${stringRows.join('')}</div>`;
+  }
+
+  document.getElementById('results').classList.add('show');
+  document.getElementById('drop').style.display = 'none';
+}
+
+function escapeHtml(s) {
+  return String(s)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
+function animateNum(id, target, ms) {
+  const el = document.getElementById(id);
+  const start = performance.now();
+  const from = 0;
+  function step(t) {
+    const p = Math.min(1, (t - start) / ms);
+    const eased = 1 - Math.pow(1 - p, 3);
+    el.textContent = Math.round(from + (target - from) * eased);
+    if (p < 1) requestAnimationFrame(step);
+  }
+  requestAnimationFrame(step);
+}
+
+// ─── Wire up drop zone ────────────────────────────────────────────────────
+
+const drop = document.getElementById('drop');
+const fileInput = document.getElementById('file-input');
+const errBox = document.getElementById('err');
+
+drop.addEventListener('click', () => fileInput.click());
+drop.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') fileInput.click(); });
+fileInput.addEventListener('change', e => { if (e.target.files[0]) handle(e.target.files[0]); });
+
+['dragenter', 'dragover'].forEach(ev => {
+  drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.add('drag-over'); });
+});
+['dragleave', 'drop'].forEach(ev => {
+  drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.remove('drag-over'); });
+});
+drop.addEventListener('drop', e => {
+  const f = e.dataTransfer.files[0];
+  if (f) handle(f);
+});
+
+document.getElementById('reset').addEventListener('click', () => {
+  document.getElementById('results').classList.remove('show');
+  document.getElementById('file-bar').classList.remove('show');
+  drop.style.display = '';
+  drop.classList.remove('scanning');
+  fileInput.value = '';
+  errBox.classList.remove('show');
+});
+
+async function handle(file) {
+  errBox.classList.remove('show');
+  const lower = file.name.toLowerCase();
+  const isJar = lower.endsWith('.jar') || lower.endsWith('.zip');
+  const isJava = lower.endsWith('.java');
+  if (!isJar && !isJava) {
+    errBox.textContent = 'Please drop a .jar, .zip, or .java file.';
+    errBox.classList.add('show');
+    return;
+  }
+  drop.classList.add('scanning');
+  const setProgress = makeProgressReporter();
+  setProgress(0, 0, 'starting');
+  try {
+    const r = isJava
+      ? await scanJavaSource(file, setProgress)
+      : await scan(file, setProgress);
+    drop.classList.remove('scanning');
+    render(r);
+  } catch (e) {
+    drop.classList.remove('scanning');
+    errBox.textContent = 'Scan failed: ' + (e && e.message ? e.message : String(e));
+    errBox.classList.add('show');
+    console.error(e);
+  }
+}</script>
 </body>
 </html>
