@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>Tyler Portfolio</title>
+<title>Casual Portfolio</title>
 
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;600;700&display=swap" rel="stylesheet">
@@ -24,6 +24,51 @@ body{
     background: linear-gradient(135deg, #0f172a, #111827);
     color:white;
     overflow-x:hidden;
+}
+
+/* Snowballs Background */
+.snow{
+    position:fixed;
+    top:0;
+    left:0;
+    width:100%;
+    height:100%;
+    pointer-events:none;
+    z-index:-1;
+    overflow:hidden;
+}
+
+.snow::before,
+.snow::after{
+    content:"";
+    position:absolute;
+    width:100%;
+    height:100%;
+    background-image:
+        radial-gradient(circle, white 3px, transparent 4px),
+        radial-gradient(circle, white 5px, transparent 6px),
+        radial-gradient(circle, white 2px, transparent 3px);
+    background-size:200px 200px;
+    animation:snowFall linear infinite;
+    opacity:0.7;
+}
+
+.snow::before{
+    animation-duration:10s;
+}
+
+.snow::after{
+    animation-duration:16s;
+    opacity:0.4;
+}
+
+@keyframes snowFall{
+    from{
+        transform:translateY(-100%);
+    }
+    to{
+        transform:translateY(100%);
+    }
 }
 
 /* Navbar */
@@ -78,9 +123,7 @@ nav a:hover{
 
 .hero h1{
     font-size:4.5rem;
-    background:linear-gradient(to right,#60a5fa,#8b5cf6);
-    -webkit-background-clip:text;
-    -webkit-text-fill-color:transparent;
+    color:white;
 }
 
 .hero p{
@@ -150,6 +193,7 @@ nav a:hover{
 
 .card p{
     color:#cbd5e1;
+    margin-bottom:20px;
 }
 
 /* Footer */
@@ -174,6 +218,8 @@ footer{
 </head>
 <body>
 
+<div class="snow"></div>
+
 <nav>
     <div class="logo">Casual.dev</div>
     <ul>
@@ -184,10 +230,9 @@ footer{
 
 <section class="hero">
     <div class="hero-content">
-        <h1>Hey, I'm Casual 👋</h1>
+        <h1>Hi im Casual</h1>
         <p>
-            I create cool websites, Minecraft projects,
-            and awesome things on the web.
+            I make Minecraft projects, mods, and cool things for the community.
         </p>
         <a href="#projects" class="btn">
             View Projects
@@ -196,30 +241,39 @@ footer{
 </section>
 
 <section class="projects" id="projects">
-    <h2 class="section-title">My Projects</h2>
+    <h2 class="section-title">My Minecraft Projects</h2>
 
     <div class="card-grid">
 
         <div class="card">
-            <h3>🎮 Minecraft Plugin</h3>
-            <p>Custom Paper plugins with unique features.</p>
+            <h3>⛏️ My Modrinth Projects</h3>
+            <p>
+                Explore my Minecraft mods and projects on Modrinth.
+            </p>
+            <a href="https://modrinth.com/user/Casual_" class="btn" target="_blank">
+                View Modrinth
+            </a>
         </div>
 
         <div class="card">
-            <h3>🌐 Website Design</h3>
-            <p>Modern responsive websites with smooth UI.</p>
+            <h3>⚡ Minecraft Development</h3>
+            <p>
+                I create Minecraft-related projects, plugins, and experiments.
+            </p>
         </div>
 
         <div class="card">
-            <h3>⚡ Future Projects</h3>
-            <p>More awesome stuff coming soon.</p>
+            <h3>🚀 More Coming Soon</h3>
+            <p>
+                More Minecraft projects and updates will be added soon.
+            </p>
         </div>
 
     </div>
 </section>
 
 <footer>
-    © 2026 Portfolio
+    © 2026 Casual Portfolio
 </footer>
 
 <script>
