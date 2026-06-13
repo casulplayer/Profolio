@@ -21,62 +21,9 @@ html{
 }
 
 body{
-    background: #0f172a;
+    background: linear-gradient(135deg, #0f172a, #111827);
     color:white;
     overflow-x:hidden;
-}
-
-/* Animated Background */
-.bg-animation{
-    position:fixed;
-    width:100%;
-    height:100%;
-    top:0;
-    left:0;
-    overflow:hidden;
-    z-index:-1;
-}
-
-.blob{
-    position:absolute;
-    border-radius:50%;
-    filter: blur(90px);
-    animation: float 15s infinite ease-in-out;
-}
-
-.blob1{
-    width:400px;
-    height:400px;
-    background:#3b82f6;
-    top:-100px;
-    left:-100px;
-}
-
-.blob2{
-    width:350px;
-    height:350px;
-    background:#8b5cf6;
-    bottom:-100px;
-    right:-100px;
-    animation-delay:2s;
-}
-
-.blob3{
-    width:300px;
-    height:300px;
-    background:#06b6d4;
-    top:40%;
-    left:50%;
-    animation-delay:4s;
-}
-
-@keyframes float{
-    0%,100%{
-        transform:translateY(0px) translateX(0px);
-    }
-    50%{
-        transform:translateY(-50px) translateX(30px);
-    }
 }
 
 /* Navbar */
@@ -134,7 +81,6 @@ nav a:hover{
     background:linear-gradient(to right,#60a5fa,#8b5cf6);
     -webkit-background-clip:text;
     -webkit-text-fill-color:transparent;
-    animation: glow 3s infinite alternate;
 }
 
 .hero p{
@@ -151,21 +97,11 @@ nav a:hover{
     color:white;
     background:linear-gradient(135deg,#3b82f6,#8b5cf6);
     transition:.3s;
-    box-shadow:0 0 25px rgba(59,130,246,.5);
+    box-shadow:0 0 25px rgba(59,130,246,.35);
 }
 
 .btn:hover{
     transform:translateY(-5px) scale(1.05);
-    box-shadow:0 0 40px rgba(139,92,246,.8);
-}
-
-@keyframes glow{
-    from{
-        text-shadow:0 0 15px rgba(96,165,250,.3);
-    }
-    to{
-        text-shadow:0 0 35px rgba(139,92,246,.8);
-    }
 }
 
 /* Projects */
@@ -202,9 +138,9 @@ nav a:hover{
 }
 
 .card:hover{
-    transform:translateY(-15px) rotate(1deg);
+    transform:translateY(-12px);
     border-color:#60a5fa;
-    box-shadow:0 0 35px rgba(96,165,250,.25);
+    box-shadow:0 0 35px rgba(96,165,250,.2);
 }
 
 .card h3{
@@ -238,14 +174,8 @@ footer{
 </head>
 <body>
 
-<div class="bg-animation">
-    <div class="blob blob1"></div>
-    <div class="blob blob2"></div>
-    <div class="blob blob3"></div>
-</div>
-
 <nav>
-    <div class="logo">Tyler.dev</div>
+    <div class="logo">Casual.dev</div>
     <ul>
         <li><a href="#">Home</a></li>
         <li><a href="#projects">Projects</a></li>
@@ -254,7 +184,7 @@ footer{
 
 <section class="hero">
     <div class="hero-content">
-        <h1>Hey, I'm Tyler 👋</h1>
+        <h1>Hey, I'm Casual 👋</h1>
         <p>
             I create cool websites, Minecraft projects,
             and awesome things on the web.
@@ -289,7 +219,7 @@ footer{
 </section>
 
 <footer>
-    © 2026 Tyler Portfolio
+    © 2026 Portfolio
 </footer>
 
 <script>
