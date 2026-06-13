@@ -38,36 +38,62 @@ body{
     overflow:hidden;
 }
 
-.snow::before,
+/* Fast snowballs */
+.snow::before{
+    content:"";
+    position:absolute;
+    top:-100%;
+    left:0;
+    width:100%;
+    height:200%;
+    background-image:
+        radial-gradient(circle, rgba(255,255,255,.95) 2px, transparent 3px),
+        radial-gradient(circle, rgba(255,255,255,.8) 3px, transparent 4px),
+        radial-gradient(circle, rgba(255,255,255,.7) 2px, transparent 3px);
+
+    background-size:
+        140px 140px,
+        220px 220px,
+        300px 300px;
+
+    animation:snowFast 8s linear infinite;
+}
+
+/* Slow snowballs */
 .snow::after{
     content:"";
     position:absolute;
+    top:-100%;
+    left:0;
     width:100%;
-    height:100%;
+    height:200%;
     background-image:
-        radial-gradient(circle, white 3px, transparent 4px),
-        radial-gradient(circle, white 5px, transparent 6px),
-        radial-gradient(circle, white 2px, transparent 3px);
-    background-size:200px 200px;
-    animation:snowFall linear infinite;
-    opacity:0.7;
+        radial-gradient(circle, rgba(255,255,255,.95) 5px, transparent 6px),
+        radial-gradient(circle, rgba(255,255,255,.75) 4px, transparent 5px);
+
+    background-size:
+        260px 260px,
+        380px 380px;
+
+    animation:snowSlow 18s linear infinite;
+    opacity:.75;
 }
 
-.snow::before{
-    animation-duration:10s;
-}
-
-.snow::after{
-    animation-duration:16s;
-    opacity:0.4;
-}
-
-@keyframes snowFall{
+@keyframes snowFast{
     from{
-        transform:translateY(-100%);
+        transform:translateY(-100px);
     }
     to{
-        transform:translateY(100%);
+        transform:translateY(100vh);
+    }
+}
+
+@keyframes snowSlow{
+    from{
+        transform:translateY(-100px);
+    }
+    to{
+        transform:translateY(100vh);
     }
 }
 
@@ -232,7 +258,7 @@ footer{
     <div class="hero-content">
         <h1>Hi im Casual</h1>
         <p>
-            I make Minecraft projects, mods, and cool things for the community.
+            I make Minecraft mods, plugins, and cool projects for the community.
         </p>
         <a href="#projects" class="btn">
             View Projects
@@ -246,9 +272,9 @@ footer{
     <div class="card-grid">
 
         <div class="card">
-            <h3>⛏️ My Modrinth Projects</h3>
+            <h3>⛏️ My Modrinth</h3>
             <p>
-                Explore my Minecraft mods and projects on Modrinth.
+                Check out my Minecraft mods and projects.
             </p>
             <a href="https://modrinth.com/user/Casual_" class="btn" target="_blank">
                 View Modrinth
@@ -258,14 +284,14 @@ footer{
         <div class="card">
             <h3>⚡ Minecraft Development</h3>
             <p>
-                I create Minecraft-related projects, plugins, and experiments.
+                I create plugins, mods, and Minecraft experiments.
             </p>
         </div>
 
         <div class="card">
             <h3>🚀 More Coming Soon</h3>
             <p>
-                More Minecraft projects and updates will be added soon.
+                More Minecraft projects and updates soon.
             </p>
         </div>
 
